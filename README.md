@@ -15,6 +15,8 @@
 - 單字庫完整列出 86 個單字，可搜尋英文、中文與用法，依熟悉程度／收藏篩選、A–Z 排序，並直接進入指定字卡。
 - 新加入的帳號（包含白名單的 B 帳號）預設 0 詞，不帶入原始 86 詞或其他帳號的紀錄；現有 A 帳號保留原有字庫。空白字庫有新增入口，未滿四選一所需的不同選項時不能啟動測驗。
 - 在單字庫按「＋ 新增單字」：英文與中文意思必填，詞性、英文例句、翻譯及筆記選填；每個帳號／訪客最多新增 500 詞，相同英文與意思會阻止重複加入。
+- 中文意思可從目前字庫建議或「查詢中文與詞性」的 AI 建議選取，也可手動輸入；詞性提供常用選項並保留自訂輸入。
+- 「AI 生成例句與翻譯」依所選意思與詞性產生一組英文／繁體中文例句，先預覽、再主動套用；原有內容不會在生成時被覆蓋。所有欄位都能自行修改，按「加入單字庫」才會保存。
 - 自訂單字納入搜尋、翻卡、選擇題、總數及 JSON／Markdown 備份，可用「我的自訂單字」篩選。登入後跟隨個人進度同步，只有本人可讀寫；訪客新增先存於此瀏覽器，可於登入後主動合併。
 - Supabase Email 註冊、登入、忘記密碼與密碼重設流程；需完成下方雲端服務設定才能啟用。
 - 訪客進度儲存在瀏覽器；登入後，帳號紀錄自動同步至 Supabase，各帳號分開保存。
@@ -28,7 +30,7 @@
 
 以下步驟供重新部署至其他專案時使用。未填公開設定時，介面會明確顯示「帳號登入尚未開放」，訪客功能照常運作。
 
-1. 在自己的 Supabase 專案依檔名順序執行 [資料庫 migrations](supabase/migrations/)。它們建立每個使用者一列的私有進度資料、RLS 政策、具有版本檢查的同步函式、防止舊版頁面覆蓋自訂單字的保護、私有 Email 白名單及新帳號空字庫設定。正式專案已套用這四份 migration。
+1. 在自己的 Supabase 專案依檔名順序執行 [資料庫 migrations](supabase/migrations/)。它們建立每個使用者一列的私有進度資料、RLS 政策、具有版本檢查的同步函式、防止舊版頁面覆蓋自訂單字的保護、私有 Email 白名單、新帳號空字庫設定及 AI 用量限制。
 2. 在 **Authentication → URL Configuration** 將 Site URL 設為 `https://jeffhome5370.github.io/santa-vocabulary/`，並將同一網址加入 Redirect URLs。使用其他部署網址時同步修改。
 3. 在 **Authentication → Providers** 啟用 Email／Password，保留 Email 驗證。要對外開放註冊與寄送重設密碼信，應依 Supabase 文件設定自己的 SMTP；預設寄信服務限制收件人與速率，不適合作為公開網站的完整寄信服務。
 4. 取得 Project URL 與 publishable key，填入 `dist/config.js`。舊式 `anon` key 也支援。這兩個值是瀏覽器公開設定，資料保護依靠登入 JWT 與資料庫 RLS。
@@ -55,6 +57,21 @@ export const CLOUD_CONFIG = Object.freeze({
 SQL 使用 `auth.uid()` 限定帳號，匿名訪客無讀寫權限；同步使用原子版本檢查與重試，避免覆蓋另一裝置剛寫入的紀錄。自訂字庫存在進度 JSON 的 `customWords`，使用穩定的獨立編號，不會改動原始 86 詞。舊備份仍可匯入；較舊的開啟中頁面若缺少雲端自訂字庫，伺服器會拒絕覆蓋，請重新整理後再同步。
 
 參考：[Supabase Email 登入](https://supabase.com/docs/guides/auth/passwords)、[API keys](https://supabase.com/docs/guides/api/api-keys)、[Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)。
+
+## Gemini 單字建議與例句
+
+前端只呼叫 Supabase Edge Function `vocabulary-assist`，不持有 Gemini API key。手動輸入與既有字庫建議不需要 AI；AI 查詢及生成僅供已驗證並登入的帳號使用。
+
+1. 套用所有 migrations，部署 [Edge Function](supabase/functions/vocabulary-assist/)。`supabase/config.toml` 設定 `verify_jwt = false`，因為函式本身以 Supabase Auth `/user` 驗證使用者，兼容新式 publishable key；不是公開匿名的 AI 代理。
+2. 管理者親自在 **Supabase → Edge Functions → Secrets** 新增 `GEMINI_API_KEY`。不要將 key 寫入 `dist/config.js`、GitHub、聊天或瀏覽器儲存。
+3. 預設模型為 `gemini-3.5-flash-lite`；如該 key 的專案無法使用，可在 Secrets 設定 `GEMINI_MODEL` 為該專案可用、支援結構化輸出的 Gemini 文字模型。伺服器不接受前端指定模型或 API 目的地。
+4. 登入後，在單字庫新增表單輸入英文，按「查詢中文與詞性」；選好意思後，再按「AI 生成例句與翻譯」。確認預覽並套用，或保留自行填寫的內容。
+
+每帳號每分鐘最多 6 次、每天最多 60 次（台灣時間午夜重設）。計數器存在私有 schema，使用者無法直接讀寫或重設；通過限制後送往 Gemini 的嘗試會計入用量，即使供應商失敗也不退還該次計數。供應商本身可能另有更低限制及費用；請在 Google AI Studio 確認 key 所屬專案的方案與額度。
+
+AI 查詢只傳送英文；例句生成傳送英文、所選中文意思與詞性。函式不傳送 Email、使用者 ID、整份單字庫、學習紀錄或手動例句給 Gemini，不記錄 prompt 或供應商回覆。Google 免費方案可能將輸入與輸出用於改善產品，請勿在欄位輸入機密資料。AI 建議可能有誤，需自行確認。變更單字、意思、詞性、手動例句或帳號後，舊請求的回覆不會套入新內容；取消／儲存表單也會忽略尚未完成的回覆。
+
+參考：[Gemini 模型](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite)、[API 與方案](https://ai.google.dev/gemini-api/docs/pricing)、[Supabase Secrets](https://supabase.com/docs/guides/functions/secrets)。
 
 ## 本機預覽
 

@@ -51,9 +51,11 @@
         <div id="add-word-panel" class="panel add-word-panel" hidden>
           <p class="eyebrow">GROW YOUR COLLECTION</p><h2>把想記住的單字，放進來。</h2><p id="add-word-storage" class="muted"></p>
           <form id="add-word-form" class="add-word-form">
-            <label for="new-word">英文單字或片語（必填）<input id="new-word" name="word" maxlength="100" required autocomplete="off" placeholder="例如 resilient"></label>
-            <label for="new-meaning">中文意思（必填）<input id="new-meaning" name="meaning" maxlength="500" required placeholder="例如 有韌性的；能恢復的"></label>
-            <label for="new-pos">詞性（選填）<input id="new-pos" name="pos" maxlength="40" placeholder="例如 adj.、n.、phr.v."></label>
+            <div class="word-assist-field"><label for="new-word">英文單字或片語（必填）<input id="new-word" name="word" maxlength="100" required autocomplete="off" placeholder="例如 resilient"></label><button id="lookup-meanings" type="button" class="button outline assist-button">查詢中文與詞性</button></div>
+            <div class="word-assist-field"><label for="new-meaning">中文意思（必填）<input id="new-meaning" name="meaning" maxlength="500" required placeholder="選擇下方建議，或自行輸入"></label><div id="meaning-choices" class="suggestion-choices" role="group" aria-label="中文意思建議"></div><p id="meaning-source" class="field-hint">輸入英文後可查詢建議，也能直接填寫中文。</p></div>
+            <div class="word-assist-field"><label for="new-pos">詞性（選填）<input id="new-pos" name="pos" maxlength="40" placeholder="點選詞性，或自行輸入"></label><div id="pos-choices" class="suggestion-choices" role="group" aria-label="常用詞性"></div></div>
+            <div class="word-ai-tools"><div><strong>讓例句幫你記住單字</strong><p class="field-hint">先選好意思與詞性，再產生例句；也能直接在下方填寫。</p></div><button id="generate-example" type="button" class="button outline assist-button">✦ AI 生成例句與翻譯</button><p id="word-assist-status" class="field-hint assist-status" role="status" aria-live="polite"></p><p id="word-assist-privacy" class="field-hint">登入後可使用 AI。查詢時只傳送英文；生成例句時會傳送英文、中文意思與詞性。AI 建議請確認後再使用。</p></div>
+            <div id="ai-example-preview" class="ai-example-preview" hidden><p class="eyebrow">AI 例句建議</p><p id="ai-example-en" lang="en"></p><p id="ai-example-zh"></p><p class="field-hint">套用會取代下方例句與翻譯，套用後仍可修改。</p><div class="add-word-actions"><button id="apply-ai-example" type="button" class="button primary">套用這組例句</button><button id="dismiss-ai-example" type="button" class="text-button">保留原本內容</button></div></div>
             <label for="new-example">英文例句（選填）<textarea id="new-example" name="example" maxlength="1000" rows="2"></textarea></label>
             <label for="new-translation">例句翻譯（選填）<textarea id="new-translation" name="translation" maxlength="1000" rows="2"></textarea></label>
             <label for="new-note">用法筆記（選填）<textarea id="new-note" name="note" maxlength="500" rows="2"></textarea></label>

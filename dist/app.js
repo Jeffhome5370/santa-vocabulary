@@ -2,6 +2,7 @@ import { WORDS as BASE_WORDS } from './data.js';
 import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
 import { createAccountClient, friendlyAuthError } from './account.js';
 import { createRemote, createSyncCoordinator, fingerprint } from './cloud-sync.js';
+import { mountWordAssistant } from './word-assistant.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -16,6 +17,10 @@ let syncPhase = 'guest', syncDetail;
 let authReady = false, libraryReady = false;
 const accountStorageKey = id => `${STORAGE_KEY}.user.${id}`;
 const activeStorageKey = () => activeUser ? accountStorageKey(activeUser.id) : STORAGE_KEY;
+const wordAssistant = mountWordAssistant({
+  getClient: () => authClient, getUser: () => activeUser,
+  getWords: () => [...BASE_WORDS, ...(state.customWords || [])],
+});
 
 function toast(message, duration = 4500) {
   clearTimeout(toastTimer);
@@ -304,6 +309,7 @@ $('#library-filter').addEventListener('change', renderLibrary);
 $('#library-sort').addEventListener('change', renderLibrary);
 $('#clear-library-filters').addEventListener('click', () => { $('#search').value = ''; $('#library-filter').value = 'all'; $('#library-sort').value = 'source'; renderLibrary(); });
 function closeWordForm() {
+  wordAssistant.reset();
   $('#add-word-panel').hidden = true;
   $('#open-add-word').setAttribute('aria-expanded', 'false');
   $('#add-word-form').reset();
@@ -313,6 +319,7 @@ $('#open-add-word').addEventListener('click', () => {
   $('#add-word-panel').hidden = false;
   $('#open-add-word').setAttribute('aria-expanded', 'true');
   $('#add-word-storage').textContent = activeUser ? '新增後會自動同步至你的帳號，只有你能使用。' : '目前是訪客模式，單字儲存在此瀏覽器；登入後可選擇合併至帳號。';
+  wordAssistant.refreshAccount();
   $('#new-word').focus();
 });
 $('#cancel-add-word').addEventListener('click', () => { closeWordForm(); $('#open-add-word').focus(); });

@@ -1,0 +1,4 @@
+[functions.vocabulary-assist]
+# The handler verifies the user with Supabase Auth before any AI request.
+# Required for modern publishable keys and rotating user JWT signing keys.
+verify_jwt = false
