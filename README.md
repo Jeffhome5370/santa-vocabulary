@@ -2,6 +2,10 @@
 
 86 個英文單字的翻字卡與四選一複習網站。介面使用繁體中文，支援手機與桌面，無需安裝前端依賴。
 
+**線上使用：[Santa 單字室](https://jeffhome5370.github.io/santa-vocabulary/)**
+
+原始碼：[Jeffhome5370/santa-vocabulary](https://github.com/Jeffhome5370/santa-vocabulary)。
+
 ## 功能
 
 - 點擊或按空白鍵翻卡，方向鍵切換字卡；可切換英文或中文正面。
