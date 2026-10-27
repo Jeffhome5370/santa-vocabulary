@@ -1,14 +1,36 @@
 export const LEGACY_STORAGE_KEY = 'santa-vocabulary.progress.v1';
 export const STORAGE_KEY = 'santa-vocabulary.progress.v2';
-export const emptyState = (includeBaseWords = true) => ({ version: 2, progress: {}, history: [], customWords: [], includeBaseWords });
-export const allWords = (base, state) => [...(state.includeBaseWords === false ? [] : base), ...(state.customWords || [])];
+export const emptyState = (includeBaseWords = true) => ({ version: 2, progress: {}, history: [], customWords: [], includeBaseWords, wordChanges: [] });
+const clock = value => value ? Date.parse(value) : -Infinity;
+const changeDeleted = change => !!change?.deletedAt && clock(change.deletedAt) >= clock(change.restoredAt);
+export const isWordDeleted = (state, id) => changeDeleted(state.wordChanges?.find(change => change.id === id));
+export function allWords(base, state, { includeDeleted = false } = {}) {
+  const changes = new Map((state.wordChanges || []).map(change => [change.id, change]));
+  return [...(state.includeBaseWords === false ? [] : base), ...(state.customWords || [])]
+    .filter(word => includeDeleted || !changeDeleted(changes.get(word.id)))
+    .map(word => changes.has(word.id) ? { ...word, ...changes.get(word.id).fields } : word);
+}
 export const visibleHistory = (words, state) => { const ids = new Set(words.map(word => word.id)); return state.history.filter(entry => ids.has(entry.wordId)); };
 export function guestForAccount(guest, account) {
   if (account.includeBaseWords !== false) return guest;
   const ids = new Set(guest.customWords.map(word => word.id));
-  return { ...guest, includeBaseWords: false, progress: Object.fromEntries(Object.entries(guest.progress).filter(([id]) => ids.has(Number(id)))), history: guest.history.filter(entry => ids.has(entry.wordId)) };
+  return { ...guest, includeBaseWords: false, wordChanges: (guest.wordChanges || []).filter(change => ids.has(change.id)), progress: Object.fromEntries(Object.entries(guest.progress).filter(([id]) => ids.has(Number(id)))), history: guest.history.filter(entry => ids.has(entry.wordId)) };
 }
 const normalize = value => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+const WORD_LIMITS = { word: 100, meaning: 500, pos: 40, example: 1000, translation: 1000, note: 500 };
+function validateWordFields(word) {
+  const safe = {};
+  for (const [field, max] of Object.entries(WORD_LIMITS)) {
+    if (typeof word?.[field] !== 'string' || word[field].length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(word[field])) throw new Error('單字欄位格式不正確或文字過長。');
+    safe[field] = word[field].trim();
+  }
+  if (!safe.word || !safe.meaning || !/[a-z]/i.test(safe.word)) throw new Error('請填寫英文單字與中文意思。');
+  return safe;
+}
+const fieldsFrom = fields => Object.fromEntries(Object.keys(WORD_LIMITS).map(field => [field, String(fields[field] || '').trim()]));
+const assertCapacity = state => {
+  if (new TextEncoder().encode(JSON.stringify(state)).length > 1_800_000) throw new Error('資料接近容量上限，變更尚未儲存。請先匯出備份。');
+};
 export function validateCustomWords(input, base) {
   if (input === undefined) return [];
   if (!Array.isArray(input) || input.length > 500) throw new Error('自訂單字格式不正確，最多可加入 500 個單字。');
@@ -16,25 +38,68 @@ export function validateCustomWords(input, base) {
   return input.map(word => {
     if (!word || !Number.isSafeInteger(word.id) || word.id < 1_000_000 || ids.has(word.id)) throw new Error('自訂單字編號不正確或重複。');
     ids.add(word.id);
-    const safe = { id: word.id };
-    for (const [field, max] of Object.entries({ word: 100, meaning: 500, pos: 40, example: 1000, translation: 1000, note: 500 })) {
-      if (typeof word[field] !== 'string' || word[field].length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(word[field])) throw new Error('單字欄位格式不正確或文字過長。');
-      safe[field] = word[field].trim();
-    }
-    if (!safe.word || !safe.meaning || !/[a-z]/i.test(safe.word)) throw new Error('請填寫英文單字與中文意思。');
-    return safe;
+    return { id: word.id, ...validateWordFields(word) };
   }).sort((a, b) => a.id - b.id);
 }
 export function addCustomWord(state, base, fields) {
   if ((state.customWords || []).length >= 500) throw new Error('目前最多可加入 500 個自訂單字。');
   const numbers = crypto.getRandomValues(new Uint32Array(2));
   let id = 1_000_000 + (numbers[0] & 0xfffff) * 4294967296 + numbers[1];
-  while (allWords(base, state).some(word => word.id === id)) id++;
-  const word = validateCustomWords([{ id, ...Object.fromEntries(['word', 'meaning', 'pos', 'example', 'translation', 'note'].map(field => [field, String(fields[field] || '').trim()])) }], base)[0];
+  while ([...base, ...(state.customWords || [])].some(word => word.id === id)) id++;
+  const word = validateCustomWords([{ id, ...fieldsFrom(fields) }], base)[0];
   if (allWords(base, state).some(existing => normalize(existing.word) === normalize(word.word) && normalize(existing.meaning) === normalize(word.meaning))) throw new Error('單字庫已經有相同的單字與意思。');
   const customWords = validateCustomWords([...(state.customWords || []), word], base);
-  if (new TextEncoder().encode(JSON.stringify({ ...state, customWords })).length > 1_800_000) throw new Error('資料接近容量上限，這個單字尚未加入。');
+  assertCapacity({ ...state, customWords });
   state.customWords = customWords;
+  return word;
+}
+export function validateWordChanges(input, base, customWords) {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.length > base.length + 500) throw new Error('單字修改紀錄格式不正確。');
+  const known = new Set([...base, ...customWords].map(word => word.id)), seen = new Set();
+  const date = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value));
+  return input.map(change => {
+    if (!change || !known.has(change.id) || seen.has(change.id) || !date(change.updatedAt)
+      || typeof change.changeId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(change.changeId)
+      || ![null, undefined].includes(change.deletedAt) && !date(change.deletedAt)
+      || ![null, undefined].includes(change.restoredAt) && !date(change.restoredAt)) throw new Error('單字修改紀錄格式不正確。');
+    seen.add(change.id);
+    return { id: change.id, fields: validateWordFields(change.fields), updatedAt: change.updatedAt, changeId: change.changeId, deletedAt: change.deletedAt || null, restoredAt: change.restoredAt || null };
+  }).sort((a, b) => a.id - b.id);
+}
+function getWordChange(state, word) {
+  return state.wordChanges?.find(change => change.id === word.id) || { id: word.id, fields: validateWordFields(word), updatedAt: '1970-01-01T00:00:00.000Z', changeId: 'initial', deletedAt: null, restoredAt: null };
+}
+const nextWordTime = change => new Date(Math.max(Date.now(), ...['updatedAt', 'deletedAt', 'restoredAt'].map(key => clock(change[key]) + 1))).toISOString();
+function putWordChange(state, base, change) {
+  const wordChanges = validateWordChanges([...(state.wordChanges || []).filter(item => item.id !== change.id), change], base, state.customWords || []);
+  assertCapacity({ ...state, wordChanges }); state.wordChanges = wordChanges;
+}
+function assertUniqueWord(state, base, word) {
+  if (allWords(base, state).some(existing => existing.id !== word.id && normalize(existing.word) === normalize(word.word) && normalize(existing.meaning) === normalize(word.meaning))) throw new Error('單字庫已經有相同的單字與意思。');
+}
+export function updateWord(state, base, id, fields) {
+  const current = allWords(base, state).find(word => word.id === id);
+  if (!current) throw new Error('此單字已刪除或不存在，請重新開啟單字庫。');
+  const word = { id, ...validateWordFields(fieldsFrom(fields)) };
+  assertUniqueWord(state, base, word);
+  const change = getWordChange(state, current);
+  putWordChange(state, base, { ...change, fields: validateWordFields(word), updatedAt: nextWordTime(change), changeId: crypto.randomUUID() });
+  return word;
+}
+export function deleteWord(state, base, id) {
+  const word = allWords(base, state).find(word => word.id === id);
+  if (!word) throw new Error('此單字已刪除或不存在。');
+  const change = getWordChange(state, word);
+  putWordChange(state, base, { ...change, deletedAt: nextWordTime(change) });
+  return word;
+}
+export function restoreWord(state, base, id) {
+  const word = allWords(base, state, { includeDeleted: true }).find(word => word.id === id);
+  if (!word || !isWordDeleted(state, id)) throw new Error('此單字已復原或不存在。');
+  assertUniqueWord(state, base, word);
+  const change = getWordChange(state, word);
+  putWordChange(state, base, { ...change, restoredAt: nextWordTime(change) });
   return word;
 }
 const ACTOR = crypto.randomUUID();
@@ -115,6 +180,7 @@ export function validateState(input, words) {
   if (input.includeBaseWords !== undefined && typeof input.includeBaseWords !== 'boolean') fail();
   safe.includeBaseWords = input.includeBaseWords ?? true;
   safe.customWords = customWords;
+  safe.wordChanges = validateWordChanges(input.wordChanges, words, customWords);
   for (const [key, p] of Object.entries(input.progress)) {
     if (!/^\d+$/.test(key) || !ids.has(Number(key)) || !p || typeof p !== 'object') fail();
     for (const field of ['reviews', 'correct', 'wrong']) if (!Number.isSafeInteger(p[field]) || p[field] < 0) fail();
@@ -152,6 +218,16 @@ export function mergeStates(current, incoming, words) {
     if (!existing || JSON.stringify(word) > JSON.stringify(existing)) custom.set(word.id, word);
   }
   result.customWords = validateCustomWords([...custom.values()], words);
+  const changes = new Map();
+  for (const change of [...a.wordChanges, ...b.wordChanges]) {
+    const previous = changes.get(change.id);
+    if (!previous) { changes.set(change.id, change); continue; }
+    const compare = clock(change.updatedAt) - clock(previous.updatedAt) || change.changeId.localeCompare(previous.changeId) || JSON.stringify(change.fields).localeCompare(JSON.stringify(previous.fields));
+    const latest = compare > 0 ? change : previous;
+    const later = field => clock(change[field]) > clock(previous[field]) ? change[field] : previous[field];
+    changes.set(change.id, { ...latest, deletedAt: later('deletedAt'), restoredAt: later('restoredAt') });
+  }
+  result.wordChanges = validateWordChanges([...changes.values()], words, result.customWords);
   for (const word of [...words, ...result.customWords]) {
     const left = a.progress[word.id], right = b.progress[word.id];
     if (!left && !right) continue;

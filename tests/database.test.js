@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { emptyState, recordAnswer } from '../dist/engine.js';
+import { emptyState, recordAnswer, updateWord, deleteWord, restoreWord } from '../dist/engine.js';
+import { WORDS } from '../dist/data.js';
 
 test('actual PostgreSQL migration isolates users and rejects stale writes', async () => {
   const db = new PGlite();
@@ -30,6 +31,9 @@ test('actual PostgreSQL migration isolates users and rejects stale writes', asyn
     const libraryMigration = await readFile(new URL('../supabase/migrations/20261027171520_empty_personal_libraries.sql', import.meta.url), 'utf8');
     await db.exec(libraryMigration);
     await db.exec(libraryMigration);
+    const editableMigration = await readFile(new URL('../supabase/migrations/20261027181806_editable_vocabulary.sql', import.meta.url), 'utf8');
+    await db.exec(editableMigration);
+    await db.exec(editableMigration);
     // A has a pre-existing legacy library; B is a brand-new account.
     await db.query('insert into public.santa_progress(user_id) values ($1)', [userA]);
     await db.exec('set role anon');
@@ -54,6 +58,17 @@ test('actual PostgreSQL migration isolates users and rejects stale writes', asyn
     const legacy = {version:2,progress:stateA.progress,history:stateA.history};
     await assert.rejects(db.query('select public.sync_santa_progress($1,2,$2)', [userA, legacy]), /Custom vocabulary is missing/);
     await assert.rejects(db.query('select public.sync_santa_progress($1,2,$2)', [userA, {...stateA,customWords:{}}]), /Invalid custom vocabulary/);
+    const editedA = structuredClone(stateA);
+    updateWord(editedA, WORDS, 1000001, { ...stateA.customWords[0], meaning: '能迅速恢復的' });
+    await db.query('select public.sync_santa_progress($1,2,$2)', [userA, editedA]);
+    await assert.rejects(db.query('select public.sync_santa_progress($1,3,$2)', [userA, stateA]), /Word changes are missing or stale/);
+    await assert.rejects(db.query('select public.sync_santa_progress($1,3,$2)', [userA, {...editedA,wordChanges:[...editedA.wordChanges,...editedA.wordChanges]}]), /Invalid word changes/);
+    const deletedA = structuredClone(editedA); deleteWord(deletedA, WORDS, 1000001);
+    await db.query('select public.sync_santa_progress($1,3,$2)', [userA, deletedA]);
+    const staleEdit = structuredClone(editedA); updateWord(staleEdit, WORDS, 1000001, {...stateA.customWords[0],meaning:'較晚的離線編輯'});
+    await assert.rejects(db.query('select public.sync_santa_progress($1,4,$2)', [userA, staleEdit]), /Word changes are missing or stale/);
+    const restoredA = structuredClone(deletedA); restoreWord(restoredA, WORDS, 1000001);
+    await db.query('select public.sync_santa_progress($1,4,$2)', [userA, restoredA]);
     await db.query("select set_config('request.jwt.claim.sub',$1,false)", [userB]);
     assert.equal((await db.query('select * from public.santa_progress')).rows.length, 0);
     const stateB = emptyState(false); recordAnswer(stateB, 47, false, 'quiz', 'test-B');

@@ -48,3 +48,11 @@
 .ai-example-preview #ai-example-zh { font-size: 14px; margin: 7px 0; }
 .ai-example-preview .add-word-actions { margin-top: 12px; }
 @media (max-width: 600px) { .word-ai-tools, .ai-example-preview { padding: 15px; } .assist-button { width: 100%; } }
+.manage-word { padding: 6px 9px; border-radius: 5px; background: var(--green-light); color: var(--green); font-size: 11px; min-height: 32px; }
+.manage-word.delete { color: var(--red); background: #fbf0e8; }
+.word-row .row-actions { gap: 7px; }
+.word-delete-panel { margin-bottom: 22px; border-color: #e5c9b7; background: #fffaf5; }
+.word-delete-panel h2 { font-size: 22px; }
+.word-delete-panel p { overflow-wrap: anywhere; }
+.auth-message:empty { display: none; }
+@media (max-width: 760px) { .word-row .row-actions { max-width: 100px; } .manage-word { padding: 5px 7px; font-size: 11px; } }

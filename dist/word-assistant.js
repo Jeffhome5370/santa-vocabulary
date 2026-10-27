@@ -144,6 +144,7 @@ export function mountWordAssistant({ getClient, getUser, getWords }) {
   $('#dismiss-ai-example').addEventListener('click', () => { hidePreview(); status('已保留原本的例句與翻譯。'); });
   return {
     refreshAccount,
+    refreshFields() { invalidate(); refreshLocal(); updatePos(); refreshAccount(); },
     reset() {
       invalidate(); lookupRequest++; exampleRequest++; lookupBusy = false; exampleBusy = false;
       $('#lookup-meanings').disabled = false; $('#generate-example').disabled = false;

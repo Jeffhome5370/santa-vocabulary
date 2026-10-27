@@ -1,5 +1,5 @@
 import { WORDS as BASE_WORDS } from './data.js';
-import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
+import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
 import { createAccountClient, friendlyAuthError } from './account.js';
 import { createRemote, createSyncCoordinator, fingerprint } from './cloud-sync.js';
 import { mountWordAssistant } from './word-assistant.js';
@@ -15,11 +15,12 @@ let authClient = null, cloudSync = null, activeUser = null, authMode = 'signin',
 let reviewActor = crypto.randomUUID();
 let syncPhase = 'guest', syncDetail;
 let authReady = false, libraryReady = false;
+let editingWordId = null, editingWordSnapshot = null, pendingDeleteId = null, pendingDeleteSnapshot = null;
 const accountStorageKey = id => `${STORAGE_KEY}.user.${id}`;
 const activeStorageKey = () => activeUser ? accountStorageKey(activeUser.id) : STORAGE_KEY;
 const wordAssistant = mountWordAssistant({
   getClient: () => authClient, getUser: () => activeUser,
-  getWords: () => [...BASE_WORDS, ...(state.customWords || [])],
+  getWords: () => allWords(BASE_WORDS, state),
 });
 
 function toast(message, duration = 4500) {
@@ -209,15 +210,21 @@ function finishQuiz() {
 function renderLibrary() {
   const query = $('#search').value.trim().toLowerCase();
   const selected = $('#library-filter').value;
-  const found = WORDS.filter(word => `${word.word} ${word.meaning} ${word.note} ${word.example} ${word.translation}`.toLowerCase().includes(query) && (selected === 'custom' ? word.id >= 1_000_000 : selected === 'known' ? getProgress(state, word.id).lastCorrect === true : matchesFilter(word, state, selected)));
+  const deleted = authReady && (!activeUser || libraryReady) ? allWords(BASE_WORDS, state, { includeDeleted: true }).filter(word => isWordDeleted(state, word.id)) : [];
+  const candidates = selected === 'deleted' ? deleted : WORDS;
+  const found = candidates.filter(word => `${word.word} ${word.meaning} ${word.note} ${word.example} ${word.translation}`.toLowerCase().includes(query) && (selected === 'deleted' || (selected === 'custom' ? word.id >= 1_000_000 : selected === 'known' ? getProgress(state, word.id).lastCorrect === true : matchesFilter(word, state, selected))));
   if ($('#library-sort').value !== 'source') found.sort((a, b) => a.word.localeCompare(b.word, 'en') * ($('#library-sort').value === 'az' ? 1 : -1));
   $('#library-total').textContent = WORDS.length;
-  $('#custom-word-count').textContent = state.includeBaseWords === false ? `個人單字庫 · ${state.customWords?.length || 0} 個單字` : `原始 ${BASE_WORDS.length} 個 · 自訂 ${state.customWords?.length || 0} 個`;
-  $('#search-count').textContent = `顯示 ${found.length}／${WORDS.length}`;
+  const customCount = WORDS.filter(word => word.id >= 1_000_000).length;
+  $('#custom-word-count').textContent = `${state.includeBaseWords === false ? `個人單字庫 · ${customCount} 個單字` : `原始 ${WORDS.length - customCount} 個 · 自訂 ${customCount} 個`} · 已刪除 ${deleted.length} 個`;
+  $('#search-count').textContent = selected === 'deleted' ? `已刪除 ${found.length}／${deleted.length}` : `顯示 ${found.length}／${WORDS.length}`;
   $('#word-list').innerHTML = found.length ? found.map(word => {
     const p = getProgress(state, word.id), badge = statusBadge(word);
-    return `<article class="word-row"><span class="word-number">${word.id >= 1_000_000 ? '自訂' : String(word.id).padStart(2, '0')}</span><div><h3 lang="en">${escape(word.word)}<small>${escape(word.pos)}</small></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}${!word.example && !word.translation && !word.note ? '<p>尚未填寫例句或用法。</p>' : ''}</details></div><div class="row-actions"><span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button><button class="study-word" data-study="${word.id}" aria-label="翻卡複習 ${escape(word.word)}">翻卡 ↗</button></div></article>`;
-  }).join('') : WORDS.length ? '<div class="empty"><strong>沒有符合條件的單字</strong>試試其他關鍵字，或清除學習狀態篩選。</div>' : '<div class="empty"><strong>你的單字庫還是空的</strong>按上方「＋ 新增單字」，加入自己的第一個單字。</div>';
+    const actions = selected === 'deleted'
+      ? `<span class="badge">已刪除</span><button class="manage-word" data-restore="${word.id}" aria-label="復原 ${escape(word.word)}">復原</button>`
+      : `<span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button><button class="study-word" data-study="${word.id}" aria-label="翻卡複習 ${escape(word.word)}">翻卡 ↗</button><button class="manage-word" data-edit="${word.id}" aria-label="編輯 ${escape(word.word)}">編輯</button><button class="manage-word delete" data-delete="${word.id}" aria-label="刪除 ${escape(word.word)}">刪除</button>`;
+    return `<article class="word-row"><span class="word-number">${word.id >= 1_000_000 ? '自訂' : String(word.id).padStart(2, '0')}</span><div><h3 lang="en">${escape(word.word)}<small>${escape(word.pos)}</small></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}${!word.example && !word.translation && !word.note ? '<p>尚未填寫例句或用法。</p>' : ''}</details></div><div class="row-actions">${actions}</div></article>`;
+  }).join('') : selected === 'deleted' && !deleted.length ? '<div class="empty"><strong>目前沒有已刪除的單字</strong>刪除的單字會保留在這裡，方便隨時復原。</div>' : WORDS.length || deleted.length ? '<div class="empty"><strong>沒有符合條件的單字</strong>試試其他關鍵字，或清除學習狀態篩選。</div>' : '<div class="empty"><strong>你的單字庫還是空的</strong>按上方「＋ 新增單字」，加入自己的第一個單字。</div>';
 }
 const dateLabel = at => /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : new Date(at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 function renderHistory() {
@@ -314,14 +321,22 @@ function closeWordForm() {
   $('#open-add-word').setAttribute('aria-expanded', 'false');
   $('#add-word-form').reset();
   $('#add-word-message').textContent = '';
+  editingWordId = null; editingWordSnapshot = null;
 }
-$('#open-add-word').addEventListener('click', () => {
+function openWordForm(word = null) {
+  closeWordForm();
+  closeDeleteWord();
+  editingWordId = word?.id ?? null; editingWordSnapshot = word ? fingerprint(word) : null;
   $('#add-word-panel').hidden = false;
   $('#open-add-word').setAttribute('aria-expanded', 'true');
-  $('#add-word-storage').textContent = activeUser ? '新增後會自動同步至你的帳號，只有你能使用。' : '目前是訪客模式，單字儲存在此瀏覽器；登入後可選擇合併至帳號。';
-  wordAssistant.refreshAccount();
+  $('#word-form-title').textContent = word ? '修正單字，讓記憶更準確。' : '把想記住的單字，放進來。';
+  $('#save-word-button').textContent = word ? '儲存修改 →' : '加入單字庫 →';
+  $('#add-word-storage').textContent = word ? `修改會保留原有學習紀錄與收藏。${activeUser ? '只更新你的帳號，並自動同步至雲端。' : '目前只儲存在此瀏覽器的訪客資料。'}` : activeUser ? '新增後會自動同步至你的帳號，只有你能使用。' : '目前是訪客模式，單字儲存在此瀏覽器；登入後可選擇合併至帳號。';
+  if (word) for (const key of ['word', 'meaning', 'pos', 'example', 'translation', 'note']) $(`#new-${key}`).value = word[key];
+  wordAssistant.refreshFields();
   $('#new-word').focus();
-});
+}
+$('#open-add-word').addEventListener('click', () => openWordForm());
 $('#cancel-add-word').addEventListener('click', () => { closeWordForm(); $('#open-add-word').focus(); });
 $('#add-word-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -330,18 +345,61 @@ $('#add-word-form').addEventListener('submit', event => {
   try {
     const fields = Object.fromEntries(new FormData(event.currentTarget));
     const next = structuredClone(state);
-    const word = addCustomWord(next, BASE_WORDS, fields);
+    const editing = editingWordId !== null;
+    if (editing && fingerprint(WORDS.find(word => word.id === editingWordId)) !== editingWordSnapshot) throw new Error('這個單字已在其他分頁或裝置更新／刪除。請先複製尚未儲存的內容，再取消並重新開啟編輯。');
+    const word = editing ? updateWord(next, BASE_WORDS, editingWordId, fields) : addCustomWord(next, BASE_WORDS, fields);
     // Persist first, so a full/blocked browser never reports a successful add.
     localStorage.setItem(activeStorageKey(), JSON.stringify(next));
-    state = next; save(); renderStats();
-    closeWordForm(); $('#search').value = word.word; $('#library-filter').value = 'custom'; renderLibrary();
+    state = next; save(); repaintProgress();
+    closeWordForm(); $('#search').value = word.word; $('#library-filter').value = word.id >= 1_000_000 ? 'custom' : 'all'; renderLibrary();
     $('#search').focus();
-    toast(activeUser ? '單字已加入，正在同步至帳號。' : '單字已加入此瀏覽器，現在就能翻卡複習。');
+    toast(editing ? `修改已儲存，學習紀錄已保留。${activeUser ? '正在同步至帳號。' : ''}` : activeUser ? '單字已加入，正在同步至帳號。' : '單字已加入此瀏覽器，現在就能翻卡複習。');
   } catch (error) {
     message.textContent = error.name === 'QuotaExceededError' || error.name === 'SecurityError' ? '瀏覽器無法儲存，這個單字尚未加入。請先備份並確認儲存空間。' : error.message;
   }
 });
+function closeDeleteWord() {
+  pendingDeleteId = null; pendingDeleteSnapshot = null; $('#delete-word-panel').hidden = true;
+  $('#delete-word-message').hidden = true; $('#delete-word-message').textContent = '';
+}
+function commitLibraryChange(change) {
+  if (!allowSave) throw new Error('目前無法讀取原有資料，請先匯出備份並恢復儲存。');
+  const next = structuredClone(state);
+  change(next);
+  localStorage.setItem(activeStorageKey(), JSON.stringify(next));
+  state = next; save(); repaintProgress();
+}
+$('#cancel-delete-word').addEventListener('click', () => { closeDeleteWord(); $('#search').focus(); });
+$('#confirm-delete-word').addEventListener('click', () => {
+  const message = $('#delete-word-message');
+  try {
+    const word = WORDS.find(word => word.id === pendingDeleteId);
+    if (!word) throw new Error('此單字已刪除或不存在，請按「保留單字」關閉。');
+    if (fingerprint(word) !== pendingDeleteSnapshot) {
+      pendingDeleteSnapshot = fingerprint(word); $('#delete-word-description').textContent = `「${word.word}」＝${word.meaning}`;
+      throw new Error('這個單字剛在其他裝置更新，請確認上方最新內容後，再按一次確認。');
+    }
+    commitLibraryChange(next => deleteWord(next, BASE_WORDS, word.id));
+    if (editingWordId === word.id) closeWordForm();
+    closeDeleteWord(); $('#search').focus(); toast('已移到「已刪除」，可在學習狀態篩選中復原。');
+  } catch (error) { message.textContent = /QuotaExceededError|SecurityError/.test(error.name) ? '瀏覽器無法儲存，刪除尚未完成。請先備份並檢查儲存空間。' : error.message; message.hidden = false; }
+});
 $('#word-list').addEventListener('click', event => {
+  const edit = event.target.closest('[data-edit]');
+  if (edit) { const word = WORDS.find(word => word.id === Number(edit.dataset.edit)); if (word) { closeDeleteWord(); openWordForm(word); } return; }
+  const remove = event.target.closest('[data-delete]');
+  if (remove) {
+    const word = WORDS.find(word => word.id === Number(remove.dataset.delete)); if (!word) return;
+    closeDeleteWord(); pendingDeleteId = word.id; pendingDeleteSnapshot = fingerprint(word);
+    $('#delete-word-description').textContent = `「${word.word}」＝${word.meaning}`;
+    $('#delete-word-panel').hidden = false; $('#cancel-delete-word').focus(); return;
+  }
+  const restore = event.target.closest('[data-restore]');
+  if (restore) {
+    try { commitLibraryChange(next => restoreWord(next, BASE_WORDS, Number(restore.dataset.restore))); toast('單字已復原，原有學習紀錄與收藏已保留。'); }
+    catch (error) { toast(/QuotaExceededError|SecurityError/.test(error.name) ? '瀏覽器無法儲存，復原尚未完成。' : error.message, 8000); }
+    return;
+  }
   const study = event.target.closest('[data-study]');
   if (study) {
     filter = 'all';
@@ -360,7 +418,7 @@ $('#import-progress').addEventListener('change', async event => {
     if (file.size > 2_000_000) throw new Error('檔案超過 2 MB，請選擇有效的進度備份。');
     const incoming = validateState(JSON.parse(await file.text()), BASE_WORDS);
     state = mergeStates(state, incoming, BASE_WORDS); allowSave = true; save();
-    renderStats(); renderHistory(); refreshCards();
+    repaintProgress();
     toast('進度已匯入；相同單字保留較新的狀態。');
   } catch (error) { toast(error instanceof SyntaxError ? '這不是有效的 JSON 進度檔。原有進度已保留。' : error.message, 8000); }
   finally { event.target.value = ''; }
@@ -385,11 +443,16 @@ $('#confirm-reset').addEventListener('click', () => {
 });
 window.addEventListener('storage', event => {
   if (event.key !== activeStorageKey()) return;
-  try { const other = loadState(localStorage, BASE_WORDS, activeStorageKey()); state = mergeStates(state, other, BASE_WORDS); renderStats(); if (currentView === 'cards') refreshCards(); if (currentView === 'library') renderLibrary(); if (currentView === 'progress') renderHistory(); cloudSync?.schedule(); }
+  try { const other = loadState(localStorage, BASE_WORDS, activeStorageKey()); state = mergeStates(state, other, BASE_WORDS); repaintProgress(); cloudSync?.schedule(); }
   catch { toast('其他分頁的進度無法讀取，目前的練習仍保留。'); }
 });
 function repaintProgress() {
+  const previousWords = fingerprint(WORDS);
   renderStats();
+  if (quiz && fingerprint(WORDS) !== previousWords) {
+    quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false;
+    if (currentView === 'quiz') toast('單字庫已更新，本回測驗已結束；已作答的紀錄保留，可重新開始。');
+  }
   if (currentView === 'cards') refreshCards(cards[position]?.id);
   if (currentView === 'library') renderLibrary();
   if (currentView === 'progress') renderHistory();
@@ -451,8 +514,8 @@ function renderAccount() {
       const reviewed = getStats(allWords(BASE_WORDS, guest), guest).reviewed;
       const hasStars = Object.values(guest.progress).some(p => p.starred);
       const hasNew = fingerprint(mergeStates(state, guest, BASE_WORDS)) !== fingerprint(state);
-      if (libraryReady && hasNew && (reviewed > 0 || hasStars || guest.customWords.length)) {
-        $('#guest-import-description').textContent = `此瀏覽器另有 ${reviewed} 個單字的訪客練習紀錄、${guest.customWords.length} 個自訂單字。要加入目前帳號嗎？`;
+      if (libraryReady && hasNew && (reviewed > 0 || hasStars || guest.customWords.length || guest.wordChanges?.length)) {
+        $('#guest-import-description').textContent = `此瀏覽器另有 ${reviewed} 個單字的訪客練習紀錄、${guest.customWords.length} 個自訂單字及 ${guest.wordChanges?.length || 0} 筆單字修改／刪除紀錄。要加入目前帳號嗎？`;
         $('#guest-import-offer').hidden = false;
       }
     } catch { /* A damaged guest backup must not block an account. */ }
@@ -465,6 +528,7 @@ async function activateSession(session, event = '') {
     cloudSync?.setUser(null);
     activeUser = next;
     closeWordForm();
+    closeDeleteWord();
     reviewActor = crypto.randomUUID();
     syncPhase = 'guest'; syncDetail = undefined; $('#last-sync').textContent = '';
     try { state = loadState(localStorage, BASE_WORDS, activeStorageKey()); libraryReady = !next || !!localStorage.getItem(activeStorageKey()); allowSave = true; }
