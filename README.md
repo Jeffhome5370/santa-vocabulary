@@ -40,7 +40,7 @@
 
 新增地址請由管理者在 Supabase SQL Editor 操作私有資料表，不要把真實名單加入公開 migration、前端或 Git 歷史。只有 Auth 服務可以讀取名單；一般登入者與匿名訪客不能讀寫。此 Hook 限制新註冊，停用一筆白名單不會自動撤銷已建立帳號或現有登入工作階段；若要停權，還須處理 Auth 帳號及授權。
 
-寄信選用 Gmail SMTP（`smtp.gmail.com`、587、STARTTLS），寄件人與 SMTP 使用者使用同一 Gmail。密碼使用 Google 的應用程式密碼，由管理者親自在 Supabase 後台輸入；不可使用一般 Google 登入密碼，也不可放入本儲存庫。應用程式密碼需先啟用 Google 兩步驟驗證。**目前仍待管理者完成憑證輸入、儲存及寄信實測，不能視為 SMTP 已可用。**
+寄信使用 Gmail SMTP（`smtp.gmail.com`、587、STARTTLS），寄件人與 SMTP 使用者使用同一 Gmail。管理者已親自在 Supabase 後台輸入 Google 應用程式密碼並儲存。重新載入確認自訂 SMTP 保持啟用，正式 Auth API 寄信回傳 HTTP 200，管理者也已確認收到測試信。密碼不經聊天或本儲存庫；更換時仍應由管理者直接在後台輸入應用程式密碼，不可使用一般 Google 登入密碼。應用程式密碼需先啟用 Google 兩步驟驗證。Gmail 偏向個人寄信，若日後使用量增加，宜改用專門的交易型郵件服務。
 
 參考：[Supabase SMTP](https://supabase.com/docs/guides/auth/auth-smtp)、[Auth Hooks](https://supabase.com/docs/guides/auth/auth-hooks)、[Google 應用程式密碼](https://support.google.com/accounts/answer/185833)。
 
