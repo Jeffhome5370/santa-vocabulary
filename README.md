@@ -13,6 +13,8 @@
 - 標記「已熟悉／待加強」，篩選尚未複習、待加強、收藏，以及隨機排序。
 - 每回 10 題四選一；優先安排錯題，再安排尚未複習的單字。每題作答後立即提供正解與例句。
 - 單字庫完整列出 86 個單字，可搜尋英文、中文與用法，依熟悉程度／收藏篩選、A–Z 排序，並直接進入指定字卡。
+- 在單字庫按「＋ 新增單字」：英文與中文意思必填，詞性、英文例句、翻譯及筆記選填；每個帳號／訪客最多新增 500 詞，相同英文與意思會阻止重複加入。
+- 自訂單字納入搜尋、翻卡、選擇題、總數及 JSON／Markdown 備份，可用「我的自訂單字」篩選。登入後跟隨個人進度同步，只有本人可讀寫；訪客新增先存於此瀏覽器，可於登入後主動合併。
 - Supabase Email 註冊、登入、忘記密碼與密碼重設流程；需完成下方雲端服務設定才能啟用。
 - 訪客進度儲存在瀏覽器；登入後，帳號紀錄自動同步至 Supabase，各帳號分開保存。
 - 訪客紀錄須經使用者主動選擇，才會合併至登入的帳號。
@@ -25,7 +27,7 @@
 
 以下步驟供重新部署至其他專案時使用。未填公開設定時，介面會明確顯示「帳號登入尚未開放」，訪客功能照常運作。
 
-1. 在自己的 Supabase 專案執行 [資料庫 migration](supabase/migrations/202610270001_progress.sql)。它建立每個使用者一列的私有進度資料、RLS 政策及具有版本檢查的同步函式。
+1. 在自己的 Supabase 專案依檔名順序執行 [資料庫 migrations](supabase/migrations/)。它們建立每個使用者一列的私有進度資料、RLS 政策、具有版本檢查的同步函式，以及防止舊版頁面覆蓋自訂單字的保護。正式專案已套用這兩份 migration。
 2. 在 **Authentication → URL Configuration** 將 Site URL 設為 `https://jeffhome5370.github.io/santa-vocabulary/`，並將同一網址加入 Redirect URLs。使用其他部署網址時同步修改。
 3. 在 **Authentication → Providers** 啟用 Email／Password，保留 Email 驗證。要對外開放註冊與寄送重設密碼信，應依 Supabase 文件設定自己的 SMTP；預設寄信服務限制收件人與速率，不適合作為公開網站的完整寄信服務。
 4. 取得 Project URL 與 publishable key，填入 `dist/config.js`。舊式 `anon` key 也支援。這兩個值是瀏覽器公開設定，資料保護依靠登入 JWT 與資料庫 RLS。
@@ -39,7 +41,7 @@ export const CLOUD_CONFIG = Object.freeze({
 });
 ```
 
-資料庫 migration 可重複執行，不會清空現有資料。SQL 使用 `auth.uid()` 限定帳號，匿名訪客無讀寫權限；同步使用原子版本檢查與重試，避免覆蓋另一裝置剛寫入的紀錄。
+SQL 使用 `auth.uid()` 限定帳號，匿名訪客無讀寫權限；同步使用原子版本檢查與重試，避免覆蓋另一裝置剛寫入的紀錄。自訂字庫存在進度 JSON 的 `customWords`，使用穩定的獨立編號，不會改動原始 86 詞。舊備份仍可匯入；較舊的開啟中頁面若缺少雲端自訂字庫，伺服器會拒絕覆蓋，請重新整理後再同步。
 
 參考：[Supabase Email 登入](https://supabase.com/docs/guides/auth/passwords)、[API keys](https://supabase.com/docs/guides/api/api-keys)、[Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)。
 

@@ -47,9 +47,22 @@
         <div id="quiz-result" class="panel result" hidden></div>
       </section>
       <section id="library-view" class="view" aria-label="單字庫" hidden>
-        <div class="library-overview"><div><p class="eyebrow">THE COMPLETE COLLECTION</p><h2>目前收錄 <strong id="library-total">86</strong> 個單字</h2><p>瀏覽完整清單，展開例句，或直接挑一個單字翻卡複習。</p></div><span class="library-book" aria-hidden="true">☷</span></div>
+        <div class="library-overview"><div><p class="eyebrow">THE COMPLETE COLLECTION</p><h2>目前收錄 <strong id="library-total">86</strong> 個單字</h2><p>瀏覽完整清單，展開例句，或直接挑一個單字翻卡複習。</p><p id="custom-word-count" class="muted small"></p></div><button id="open-add-word" class="button primary" aria-expanded="false" aria-controls="add-word-panel">＋ 新增單字</button></div>
+        <div id="add-word-panel" class="panel add-word-panel" hidden>
+          <p class="eyebrow">GROW YOUR COLLECTION</p><h2>把想記住的單字，放進來。</h2><p id="add-word-storage" class="muted"></p>
+          <form id="add-word-form" class="add-word-form">
+            <label for="new-word">英文單字或片語 <span aria-hidden="true">*</span><input id="new-word" name="word" maxlength="100" required autocomplete="off" placeholder="例如 resilient"></label>
+            <label for="new-meaning">中文意思 <span aria-hidden="true">*</span><input id="new-meaning" name="meaning" maxlength="500" required placeholder="例如 有韌性的；能恢復的"></label>
+            <label for="new-pos">詞性（選填）<input id="new-pos" name="pos" maxlength="40" placeholder="例如 adj.、n.、phr.v."></label>
+            <label for="new-example">英文例句（選填）<textarea id="new-example" name="example" maxlength="1000" rows="2"></textarea></label>
+            <label for="new-translation">例句翻譯（選填）<textarea id="new-translation" name="translation" maxlength="1000" rows="2"></textarea></label>
+            <label for="new-note">用法筆記（選填）<textarea id="new-note" name="note" maxlength="500" rows="2"></textarea></label>
+            <p id="add-word-message" class="auth-message error" role="status"></p>
+            <div class="add-word-actions"><button type="submit" class="button primary">加入單字庫 →</button><button id="cancel-add-word" type="button" class="button outline">取消</button></div>
+          </form>
+        </div>
         <div class="library-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜尋英文、中文或用法…" aria-label="搜尋單字"></label><span id="search-count" class="muted"></span></div>
-        <div class="library-filters"><label>學習狀態<select id="library-filter"><option value="all">全部單字</option><option value="known">已熟悉</option><option value="weak">待加強</option><option value="new">尚未複習</option><option value="starred">已收藏</option></select></label><label>排序<select id="library-sort"><option value="source">原始順序</option><option value="az">英文 A–Z</option><option value="za">英文 Z–A</option></select></label><button id="clear-library-filters" class="text-button">清除篩選</button></div>
+        <div class="library-filters"><label for="library-filter">學習狀態<select id="library-filter"><option value="all">全部單字</option><option value="custom">我的自訂單字</option><option value="known">已熟悉</option><option value="weak">待加強</option><option value="new">尚未複習</option><option value="starred">已收藏</option></select></label><label for="library-sort">排序<select id="library-sort"><option value="source">原始順序</option><option value="az">英文 A–Z</option><option value="za">英文 Z–A</option></select></label><button id="clear-library-filters" class="text-button">清除篩選</button></div>
         <div id="word-list" class="word-list"></div>
       </section>
       <section id="progress-view" class="view" aria-label="學習紀錄" hidden><div class="panel progress-panel"><div><p class="eyebrow">LITTLE STEPS ADD UP</p><h2>每次練習，都算數。</h2><p class="muted">紀錄保存在目前的瀏覽器。更換裝置時，先匯出備份再匯入。</p></div><div class="backup-actions"><button id="export-json" class="button primary">匯出進度 JSON ↓</button><button id="export-md" class="button outline">匯出複習筆記 MD ↓</button><label class="button outline import-label">匯入進度 ↑<input id="import-progress" type="file" accept="application/json,.json" class="visually-hidden"></label></div><p class="fine-print">匯入會合併紀錄；相同單字採用較新的狀態，不會重複計算次數。網頁進度不會自動回寫電腦上的 Markdown。</p><h3>最近的練習</h3><div id="recent-history"></div><details class="reset-section"><summary>管理此瀏覽器的資料</summary><p>重設後可用先前匯出的 JSON 恢復。</p><button id="reset-progress" class="button danger">重設學習進度</button><div id="reset-confirmation" class="reset-confirmation" role="group" aria-label="確認重設學習進度" hidden><p>確定清除所有學習進度與收藏嗎？請先匯出 JSON 備份。</p><button id="confirm-reset" class="button danger">確認重設</button> <button id="cancel-reset" class="button outline">保留資料</button></div></details></div></section>
@@ -64,7 +77,7 @@
           <div class="account-privacy"><strong>你可以放心繼續練習。</strong><p>訪客紀錄只存在此瀏覽器。登入後，各帳號的雲端紀錄分開保存；只有選擇合併時，訪客紀錄才會加入帳號。網路中斷時會先保留在本機，恢復連線後再同步。</p></div>
         </div>
       </section>
-      <footer><span>一步一步，單字會留下來。</span><span>86 WORDS · ENDLESS POSSIBILITIES</span><a href="https://quizlet.com/tw/1215722156/santa%E5%96%AE%E5%AD%97-flash-cards/" target="_blank" rel="noreferrer">原始單字集 ↗</a></footer>
+      <footer><span>一步一步，單字會留下來。</span><span id="footer-count">86 WORDS · ENDLESS POSSIBILITIES</span><a href="https://quizlet.com/tw/1215722156/santa%E5%96%AE%E5%AD%97-flash-cards/" target="_blank" rel="noreferrer">原始單字集 ↗</a></footer>
     </main>
   </div>
   <div id="toast" class="toast" role="status" hidden></div>

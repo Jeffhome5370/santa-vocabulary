@@ -1,6 +1,36 @@
 export const LEGACY_STORAGE_KEY = 'santa-vocabulary.progress.v1';
 export const STORAGE_KEY = 'santa-vocabulary.progress.v2';
-export const emptyState = () => ({ version: 2, progress: {}, history: [] });
+export const emptyState = () => ({ version: 2, progress: {}, history: [], customWords: [] });
+export const allWords = (base, state) => [...base, ...(state.customWords || [])];
+const normalize = value => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+export function validateCustomWords(input, base) {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.length > 500) throw new Error('自訂單字格式不正確，最多可加入 500 個單字。');
+  const ids = new Set(base.map(word => word.id));
+  return input.map(word => {
+    if (!word || !Number.isSafeInteger(word.id) || word.id < 1_000_000 || ids.has(word.id)) throw new Error('自訂單字編號不正確或重複。');
+    ids.add(word.id);
+    const safe = { id: word.id };
+    for (const [field, max] of Object.entries({ word: 100, meaning: 500, pos: 40, example: 1000, translation: 1000, note: 500 })) {
+      if (typeof word[field] !== 'string' || word[field].length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(word[field])) throw new Error('單字欄位格式不正確或文字過長。');
+      safe[field] = word[field].trim();
+    }
+    if (!safe.word || !safe.meaning || !/[a-z]/i.test(safe.word)) throw new Error('請填寫英文單字與中文意思。');
+    return safe;
+  }).sort((a, b) => a.id - b.id);
+}
+export function addCustomWord(state, base, fields) {
+  if ((state.customWords || []).length >= 500) throw new Error('目前最多可加入 500 個自訂單字。');
+  const numbers = crypto.getRandomValues(new Uint32Array(2));
+  let id = 1_000_000 + (numbers[0] & 0xfffff) * 4294967296 + numbers[1];
+  while (allWords(base, state).some(word => word.id === id)) id++;
+  const word = validateCustomWords([{ id, ...Object.fromEntries(['word', 'meaning', 'pos', 'example', 'translation', 'note'].map(field => [field, String(fields[field] || '').trim()])) }], base)[0];
+  if (allWords(base, state).some(existing => normalize(existing.word) === normalize(word.word) && normalize(existing.meaning) === normalize(word.meaning))) throw new Error('單字庫已經有相同的單字與意思。');
+  const customWords = validateCustomWords([...(state.customWords || []), word], base);
+  if (new TextEncoder().encode(JSON.stringify({ ...state, customWords })).length > 1_800_000) throw new Error('資料接近容量上限，這個單字尚未加入。');
+  state.customWords = customWords;
+  return word;
+}
 const ACTOR = crypto.randomUUID();
 const emptyCounts = () => ({ baseCorrect: 0, baseWrong: 0, actors: {} });
 const totals = counts => ({ correct: counts.baseCorrect + Object.values(counts.actors).reduce((sum, p) => sum + p.correct, 0), wrong: counts.baseWrong + Object.values(counts.actors).reduce((sum, p) => sum + p.wrong, 0) });
@@ -66,9 +96,11 @@ export function createQuestion(word, words, direction = 'en') {
 export function validateState(input, words) {
   const fail = () => { throw new Error('進度檔格式不正確，請選擇由 Santa 單字室匯出的 JSON。'); };
   if (!input || ![1, 2].includes(input.version) || typeof input.progress !== 'object' || !input.progress || Array.isArray(input.progress) || !Array.isArray(input.history) || input.history.length > 500) fail();
-  const ids = new Set(words.map(w => w.id));
+  const customWords = validateCustomWords(input.customWords, words);
+  const ids = new Set([...words, ...customWords].map(w => w.id));
   const isDate = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
   const safe = emptyState();
+  safe.customWords = customWords;
   for (const [key, p] of Object.entries(input.progress)) {
     if (!/^\d+$/.test(key) || !ids.has(Number(key)) || !p || typeof p !== 'object') fail();
     for (const field of ['reviews', 'correct', 'wrong']) if (!Number.isSafeInteger(p[field]) || p[field] < 0) fail();
@@ -99,7 +131,13 @@ export function validateState(input, words) {
 export function mergeStates(current, incoming, words) {
   const a = validateState(current, words), b = validateState(incoming, words);
   const result = emptyState();
-  for (const word of words) {
+  const custom = new Map();
+  for (const word of [...a.customWords, ...b.customWords]) {
+    const existing = custom.get(word.id);
+    if (!existing || JSON.stringify(word) > JSON.stringify(existing)) custom.set(word.id, word);
+  }
+  result.customWords = validateCustomWords([...custom.values()], words);
+  for (const word of allWords(words, result)) {
     const left = a.progress[word.id], right = b.progress[word.id];
     if (!left && !right) continue;
     if (!left || !right) { result.progress[word.id] = left || right; continue; }

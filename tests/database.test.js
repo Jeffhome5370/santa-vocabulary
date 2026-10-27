@@ -24,6 +24,9 @@ test('actual PostgreSQL migration isolates users and rejects stale writes', asyn
     await db.exec(migration);
     // Applying the same migration twice must not widen access or destroy rows.
     await db.exec(migration);
+    const customMigration = await readFile(new URL('../supabase/migrations/20261027163609_protect_custom_vocabulary.sql', import.meta.url), 'utf8');
+    await db.exec(customMigration);
+    await db.exec(customMigration);
     await db.exec('set role anon');
     await assert.rejects(db.query('select * from public.santa_progress'), /permission denied/);
     await assert.rejects(db.query('select public.sync_santa_progress($1,0,$2)', [userA, emptyState()]), /permission denied/);
@@ -40,6 +43,12 @@ test('actual PostgreSQL migration isolates users and rejects stale writes', asyn
     await assert.rejects(db.query('insert into public.santa_progress(user_id) values ($1)', [userB]), /row-level security/);
     await assert.rejects(db.query('select public.sync_santa_progress($1,null,$2)', [userA, stateA]), /Invalid revision/);
     await assert.rejects(db.query('select public.sync_santa_progress($1,1,$2)', [userA, {version:2,progress:{}}]), /Invalid progress payload/);
+    stateA.customWords = [{id:1000001,word:'resilient',meaning:'有韌性的',pos:'',example:'',translation:'',note:''}];
+    result = await db.query('select public.sync_santa_progress($1,1,$2) as result', [userA, stateA]);
+    assert.equal(result.rows[0].result.state.customWords[0].word, 'resilient');
+    const legacy = {version:2,progress:stateA.progress,history:stateA.history};
+    await assert.rejects(db.query('select public.sync_santa_progress($1,2,$2)', [userA, legacy]), /Custom vocabulary is missing/);
+    await assert.rejects(db.query('select public.sync_santa_progress($1,2,$2)', [userA, {...stateA,customWords:{}}]), /Invalid custom vocabulary/);
     await db.query("select set_config('request.jwt.claim.sub',$1,false)", [userB]);
     assert.equal((await db.query('select * from public.santa_progress')).rows.length, 0);
     const stateB = emptyState(); recordAnswer(stateB, 47, false, 'quiz', 'test-B');
