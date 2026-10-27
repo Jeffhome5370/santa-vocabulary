@@ -22,6 +22,7 @@ export async function createAccountClient() {
 export function friendlyAuthError(error) {
   const code = error?.code || '';
   const message = String(error?.message || '');
+  if (/此 Email 尚未獲准註冊/.test(message)) return '此 Email 尚未獲准註冊。請聯絡網站管理者加入白名單。';
   if (code === 'invalid_credentials' || /invalid login credentials/i.test(message)) return 'Email 或密碼不正確。';
   if (code === 'email_not_confirmed') return '請先點選驗證信中的連結，再登入。';
   if (/rate|too many|over_email_send_rate_limit/i.test(code + message)) return '操作太頻繁，請稍後再試。';

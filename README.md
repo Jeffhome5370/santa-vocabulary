@@ -23,16 +23,26 @@
 
 ## 啟用帳號登入與雲端儲存
 
-正式網站已連接 Supabase 專案 `igpgvylzfnbdfcvktjww`（Tokyo），資料庫、RLS 與公開設定已完成，並已啟用 Email 帳號流程。Site URL 與允許返回網址均為上方 GitHub Pages 網址。預設寄信目前僅接受專案團隊授權的 Email；開放一般使用者註冊前，管理者仍須設定自訂 SMTP。個人密碼與驗證步驟由使用者自行完成。
+正式網站已連接 Supabase 專案 `igpgvylzfnbdfcvktjww`（Tokyo），資料庫、RLS 與公開設定已完成，並已啟用 Email 帳號流程。Site URL 與允許返回網址均為上方 GitHub Pages 網址。註冊採伺服器端 Email 白名單：名單存在私有 schema，真實地址不納入公開原始碼。個人密碼與驗證步驟由使用者自行完成。
 
 以下步驟供重新部署至其他專案時使用。未填公開設定時，介面會明確顯示「帳號登入尚未開放」，訪客功能照常運作。
 
-1. 在自己的 Supabase 專案依檔名順序執行 [資料庫 migrations](supabase/migrations/)。它們建立每個使用者一列的私有進度資料、RLS 政策、具有版本檢查的同步函式，以及防止舊版頁面覆蓋自訂單字的保護。正式專案已套用這兩份 migration。
+1. 在自己的 Supabase 專案依檔名順序執行 [資料庫 migrations](supabase/migrations/)。它們建立每個使用者一列的私有進度資料、RLS 政策、具有版本檢查的同步函式、防止舊版頁面覆蓋自訂單字的保護及私有 Email 白名單。正式專案已套用這三份 migration。
 2. 在 **Authentication → URL Configuration** 將 Site URL 設為 `https://jeffhome5370.github.io/santa-vocabulary/`，並將同一網址加入 Redirect URLs。使用其他部署網址時同步修改。
 3. 在 **Authentication → Providers** 啟用 Email／Password，保留 Email 驗證。要對外開放註冊與寄送重設密碼信，應依 Supabase 文件設定自己的 SMTP；預設寄信服務限制收件人與速率，不適合作為公開網站的完整寄信服務。
 4. 取得 Project URL 與 publishable key，填入 `dist/config.js`。舊式 `anon` key 也支援。這兩個值是瀏覽器公開設定，資料保護依靠登入 JWT 與資料庫 RLS。
 5. **不要放入 `service_role`、`sb_secret_`、資料庫密碼或管理員 token。**
 6. 部署後用自己控制的 Email 完成註冊、驗證與登入。確認顯示「已同步至雲端」，再於另一瀏覽器登入確認進度；測試帳號 A 看不到帳號 B 的紀錄。
+
+## 指定 Email 白名單與寄信
+
+第三份 migration 建立 `santa_private.signup_allowlist` 及 `check_signup_allowlist(jsonb)`，必須另於 **Authentication → Auth Hooks → Before User Created** 啟用該 Postgres 函式。正式專案已啟用並以真實註冊 API 驗證非白名單回傳 403。白名單以完整 Email 比對，不區分大小寫；新專案執行 migration 時只保留當時已驗證的現有帳號。
+
+新增地址請由管理者在 Supabase SQL Editor 操作私有資料表，不要把真實名單加入公開 migration、前端或 Git 歷史。只有 Auth 服務可以讀取名單；一般登入者與匿名訪客不能讀寫。此 Hook 限制新註冊，停用一筆白名單不會自動撤銷已建立帳號或現有登入工作階段；若要停權，還須處理 Auth 帳號及授權。
+
+寄信選用 Gmail SMTP（`smtp.gmail.com`、587、STARTTLS），寄件人與 SMTP 使用者使用同一 Gmail。密碼使用 Google 的應用程式密碼，由管理者親自在 Supabase 後台輸入；不可使用一般 Google 登入密碼，也不可放入本儲存庫。應用程式密碼需先啟用 Google 兩步驟驗證。**目前仍待管理者完成憑證輸入、儲存及寄信實測，不能視為 SMTP 已可用。**
+
+參考：[Supabase SMTP](https://supabase.com/docs/guides/auth/auth-smtp)、[Auth Hooks](https://supabase.com/docs/guides/auth/auth-hooks)、[Google 應用程式密碼](https://support.google.com/accounts/answer/185833)。
 
 ```js
 export const CLOUD_CONFIG = Object.freeze({
