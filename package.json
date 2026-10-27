@@ -1,0 +1,11 @@
+{
+  "name": "santa-vocabulary",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Santa 英文翻字卡與四選一複習",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node --check dist/app.js && node --check dist/engine.js && node --check dist/data.js"
+  }
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#24584d">
+  <meta name="description" content="Santa 英文單字：翻字卡、四選一測驗與錯題複習。每次一點，讓單字留下來。">
+  <title>Santa 單字室 — 每天，記住一點</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳至主要內容</a>
+  <aside class="sidebar">
+    <a class="brand" href="./" aria-label="Santa 單字室首頁"><span class="brand-mark">S<span>✳</span></span><span>Santa<span class="brand-sub">單字室</span></span></a>
+    <div class="nav-label">你的學習空間</div>
+    <nav aria-label="主要導覽">
+      <button class="nav-item active" data-view="cards" aria-current="page"><span aria-hidden="true">▱</span>翻字卡<span class="nav-en">STUDY</span></button>
+      <button class="nav-item" data-view="quiz"><span aria-hidden="true">◈</span>選擇題<span class="nav-en">QUIZ</span></button>
+      <button class="nav-item" data-view="library"><span aria-hidden="true">☷</span>單字庫<span class="nav-en">WORDS</span></button>
+      <button class="nav-item" data-view="progress"><span aria-hidden="true">◴</span>學習紀錄<span class="nav-en">RECORD</span></button>
+    </nav>
+    <div class="sidebar-note"><span class="tiny-star">✳</span><p>不急著記住全部，<br>今天比昨天多一點。</p><span class="small-label">A LITTLE, EVERY DAY.</span></div>
+    <div class="storage-note"><span class="status-dot"></span>進度儲存在這個瀏覽器</div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><span class="breadcrumb">我的學習集 <span>/</span> <strong>Santa 單字</strong></span><span class="top-tag">EN <span>→</span> 繁中</span></header>
+    <main id="main" tabindex="-1">
+      <div class="page-heading"><div><p class="eyebrow">YOUR DAILY WORD PRACTICE</p><h1 id="page-title">每天，記住一點<span class="orange">。</span></h1><p id="page-description" class="subtitle">翻一張卡，讓一個單字變熟悉。</p></div><div class="collection-tag"><span class="collection-icon">▱</span><span>Santa 單字集<strong id="deck-count">86 個單字</strong></span></div></div>
+      <div id="stats" class="stats" aria-label="學習概況"></div>
+      <section id="cards-view" class="view" aria-label="翻字卡">
+        <div class="study-toolbar"><div class="segments" role="group" aria-label="字卡範圍"><button class="selected" data-filter="all">全部單字 <span id="all-count">86</span></button><button data-filter="weak">待加強 <span id="weak-count">0</span></button><button data-filter="new">尚未複習</button><button data-filter="starred">收藏</button></div><div class="tools"><label class="visually-hidden" for="direction">字卡正面</label><select id="direction"><option value="en">英文在正面</option><option value="zh">中文在正面</option></select><button id="shuffle" class="icon-button" title="隨機排序" aria-label="隨機排序">⇄</button></div></div>
+        <div id="empty-cards" class="empty" hidden></div>
+        <div id="card-stage" class="card-stage">
+          <div class="card-top"><span id="card-status" class="badge">尚未複習</span><button id="star-card" class="star-button" aria-label="收藏這個單字" aria-pressed="false">☆</button></div>
+          <button id="flashcard" class="flashcard" aria-label="翻開字卡" aria-pressed="false"><span class="card-inner"><span class="face front"><span class="card-kicker">THINK OF THE MEANING</span><span id="front-word" class="word" lang="en"></span><span id="front-pos" class="pos"></span><span class="flip-hint"><span aria-hidden="true">↻</span> 點擊字卡，查看答案</span></span><span class="face back" aria-hidden="true"><span class="card-kicker">ONE MORE WORD, REMEMBERED.</span><span id="back-word" class="meaning"></span><span id="back-secondary" class="back-secondary"></span><span id="back-example" class="example"></span><span id="back-note" class="card-note"></span><span class="flip-hint">↻ 再點一下，回到正面</span></span></span></button>
+          <div class="card-bottom"><span class="card-set-label">SANTA · VOCABULARY</span><button id="speak" class="speak" aria-label="朗讀英文單字">◖)) <span>聽發音</span></button></div>
+        </div>
+        <div id="card-actions"><div class="card-navigation"><button id="previous" class="arrow-button" aria-label="上一張字卡">←</button><div><strong id="card-position">1 <span>/ 86</span></strong><div class="position-track"><span id="position-bar"></span></div></div><button id="next" class="arrow-button" aria-label="下一張字卡">→</button></div><div class="recall-actions"><button id="mark-weak" class="button soft" disabled>↻ 還不熟，再練習</button><button id="mark-known" class="button primary" disabled>✓ 我記住了</button></div><p class="keyboard-hint">先翻卡，再標記熟悉程度 <span>·</span> <kbd>Space</kbd> 翻面 <span>·</span> <kbd>←</kbd> <kbd>→</kbd> 切換</p></div>
+        <div class="study-tip"><span class="tip-icon">✳</span><div><strong>把「不熟」留下來，下一次再見。</strong><p>標記待加強的單字，會在選擇題中優先出現。</p></div><button class="text-button" data-view="quiz">來做 10 題 <span>↗</span></button></div>
+      </section>
+      <section id="quiz-view" class="view" aria-label="四選一測驗" hidden>
+        <div id="quiz-setup" class="panel quiz-intro"><span class="large-symbol">◈</span><p class="eyebrow">A SMALL CHALLENGE</p><h2>用 10 題，確認你記住了多少。</h2><p>四個選項，一個答案。答完立即看解析，錯題會加入待加強。</p><label class="field-label" for="quiz-direction">出題方式</label><select id="quiz-direction"><option value="en">英文 → 中文</option><option value="zh">中文 → 英文</option><option value="mixed">混合出題</option></select><button id="start-quiz" class="button primary">開始測驗 →</button><p class="fine-print">優先安排待加強與尚未複習的單字。</p></div>
+        <div id="quiz-active" class="panel" hidden><div class="quiz-meta"><span id="quiz-position" class="eyebrow"></span><button id="end-quiz" class="text-button">結束本回</button></div><div class="quiz-track"><span id="quiz-bar"></span></div><p id="quiz-prompt" class="small-label"></p><h2 id="quiz-word" class="quiz-word"></h2><div id="quiz-options" class="quiz-options"></div><div id="quiz-feedback" class="quiz-feedback" role="status" hidden></div><button id="quiz-next" class="button primary" hidden>下一題 →</button></div>
+        <div id="quiz-result" class="panel result" hidden></div>
+      </section>
+      <section id="library-view" class="view" aria-label="單字庫" hidden><div class="library-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜尋英文、中文或用法…" aria-label="搜尋單字"></label><span id="search-count" class="muted"></span></div><div id="word-list" class="word-list"></div></section>
+      <section id="progress-view" class="view" aria-label="學習紀錄" hidden><div class="panel progress-panel"><div><p class="eyebrow">LITTLE STEPS ADD UP</p><h2>每次練習，都算數。</h2><p class="muted">紀錄保存在目前的瀏覽器。更換裝置時，先匯出備份再匯入。</p></div><div class="backup-actions"><button id="export-json" class="button primary">匯出進度 JSON ↓</button><button id="export-md" class="button outline">匯出複習筆記 MD ↓</button><label class="button outline import-label">匯入進度 ↑<input id="import-progress" type="file" accept="application/json,.json" class="visually-hidden"></label></div><p class="fine-print">匯入會合併紀錄；相同單字採用較新的狀態，不會重複計算次數。網頁進度不會自動回寫電腦上的 Markdown。</p><h3>最近的練習</h3><div id="recent-history"></div><details class="reset-section"><summary>管理此瀏覽器的資料</summary><p>重設後可用先前匯出的 JSON 恢復。</p><button id="reset-progress" class="button danger">重設學習進度</button></details></div></section>
+      <footer><span>一步一步，單字會留下來。</span><span>86 WORDS · ENDLESS POSSIBILITIES</span><a href="https://quizlet.com/tw/1215722156/santa%E5%96%AE%E5%AD%97-flash-cards/" target="_blank" rel="noreferrer">原始單字集 ↗</a></footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <noscript><p class="panel">請啟用 JavaScript，才能使用翻字卡與測驗功能。</p></noscript>
+</body>
+</html>
