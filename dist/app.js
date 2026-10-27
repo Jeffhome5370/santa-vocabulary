@@ -287,9 +287,20 @@ $('#import-progress').addEventListener('change', async event => {
   finally { event.target.value = ''; }
 });
 $('#reset-progress').addEventListener('click', () => {
-  if (!confirm('確定重設此瀏覽器的學習進度與收藏嗎？建議先匯出 JSON 備份。')) return;
+  $('#reset-progress').hidden = true;
+  $('#reset-confirmation').hidden = false;
+  $('#cancel-reset').focus();
+});
+$('#cancel-reset').addEventListener('click', () => {
+  $('#reset-confirmation').hidden = true;
+  $('#reset-progress').hidden = false;
+  $('#reset-progress').focus();
+});
+$('#confirm-reset').addEventListener('click', () => {
   state = emptyState(); allowSave = true; save(); renderStats(); renderHistory(); refreshCards();
   quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false;
+  $('#reset-confirmation').hidden = true; $('#reset-progress').hidden = false;
+  $('#reset-progress').focus();
   toast('學習進度已重設。');
 });
 window.addEventListener('storage', event => {
