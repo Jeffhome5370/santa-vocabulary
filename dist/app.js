@@ -1,5 +1,7 @@
 import { WORDS } from './data.js';
 import { STORAGE_KEY, emptyState, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, validateState, mergeStates, loadState } from './engine.js';
+import { createAccountClient, friendlyAuthError } from './account.js';
+import { createRemote, createSyncCoordinator, fingerprint } from './cloud-sync.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -7,6 +9,11 @@ const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;
 let state = emptyState(), allowSave = true, storageWarning = false;
 let filter = 'all', order = WORDS.map(word => word.id), cards = [], position = 0, flipped = false, currentView = 'cards';
 let quiz = null, toastTimer;
+let authClient = null, cloudSync = null, activeUser = null, authMode = 'signin', authBusy = false, authSubscription = null;
+let reviewActor = crypto.randomUUID();
+let syncPhase = 'guest', syncDetail;
+const accountStorageKey = id => `${STORAGE_KEY}.user.${id}`;
+const activeStorageKey = () => activeUser ? accountStorageKey(activeUser.id) : STORAGE_KEY;
 
 function toast(message, duration = 4500) {
   clearTimeout(toastTimer);
@@ -14,13 +21,14 @@ function toast(message, duration = 4500) {
   $('#toast').hidden = false;
   toastTimer = setTimeout(() => { $('#toast').hidden = true; }, duration);
 }
-function save() {
+function save({ upload = true } = {}) {
   if (!allowSave) return;
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  try { localStorage.setItem(activeStorageKey(), JSON.stringify(state)); }
   catch {
     if (!storageWarning) toast('瀏覽器無法儲存進度。請到學習紀錄匯出備份。', 8000);
     storageWarning = true;
   }
+  if (upload) cloudSync?.schedule();
 }
 try { state = loadState(localStorage, WORDS); }
 catch {
@@ -104,14 +112,14 @@ function moveCard(delta) {
 function markCard(correct) {
   if (!flipped || !cards.length) return;
   const word = cards[position];
-  recordAnswer(state, word.id, correct, 'card');
+  recordAnswer(state, word.id, correct, 'card', reviewActor);
   save(); renderStats();
   if (matchesFilter(word, state, filter)) position = (position + 1) % cards.length;
   refreshCards();
   toast(correct ? '已標記熟悉，繼續下一張。' : '已加入待加強，下次優先練習。', 2200);
 }
 function setView(view) {
-  if (!['cards', 'quiz', 'library', 'progress'].includes(view)) return;
+  if (!['cards', 'quiz', 'library', 'progress', 'account'].includes(view)) return;
   currentView = view;
   $$('.view').forEach(section => { section.hidden = section.id !== `${view}-view`; });
   $$('.nav-item').forEach(button => {
@@ -119,7 +127,7 @@ function setView(view) {
     button.classList.toggle('active', active);
     if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
   });
-  const headings = { cards: ['每天，記住一點', '翻一張卡，讓一個單字變熟悉。'], quiz: ['把記憶，練成直覺', '每回 10 題，讓熟悉變得更確定。'], library: ['你的單字，一頁收藏', '找到一個詞，再多認識它一點。'], progress: ['每一次，都有累積', '回頭看看，你已經走了多遠。'] };
+  const headings = { cards: ['每天，記住一點', '翻一張卡，讓一個單字變熟悉。'], quiz: ['把記憶，練成直覺', '每回 10 題，讓熟悉變得更確定。'], library: ['你的單字，一頁收藏', '目前有哪些單字，在這裡一次看清楚。'], progress: ['每一次，都有累積', '回頭看看，你已經走了多遠。'], account: ['每一份努力，都帶得走', '登入帳號，讓手機與電腦接續同一份進度。'] };
   $('#page-title').innerHTML = `${headings[view][0]}<span class="orange">。</span>`;
   $('#page-description').textContent = headings[view][1];
   if (view === 'cards') refreshCards(cards[position]?.id);
@@ -150,7 +158,7 @@ function answerQuiz(id) {
   const question = quiz.question, correct = id === question.word.id;
   quiz.answered = true;
   quiz.answers.push({ word: question.word, correct, selected: question.options.find(option => option.id === id)?.text });
-  recordAnswer(state, question.word.id, correct, 'quiz');
+  recordAnswer(state, question.word.id, correct, 'quiz', reviewActor);
   save(); renderStats();
   $$('.option').forEach(button => {
     const choice = Number(button.dataset.choice);
@@ -178,12 +186,15 @@ function finishQuiz() {
 }
 function renderLibrary() {
   const query = $('#search').value.trim().toLowerCase();
-  const found = WORDS.filter(word => `${word.word} ${word.meaning} ${word.note}`.toLowerCase().includes(query));
-  $('#search-count').textContent = `${found.length} 個單字`;
+  const selected = $('#library-filter').value;
+  const found = WORDS.filter(word => `${word.word} ${word.meaning} ${word.note}`.toLowerCase().includes(query) && (selected === 'known' ? getProgress(state, word.id).lastCorrect === true : matchesFilter(word, state, selected)));
+  if ($('#library-sort').value !== 'source') found.sort((a, b) => a.word.localeCompare(b.word, 'en') * ($('#library-sort').value === 'az' ? 1 : -1));
+  $('#library-total').textContent = WORDS.length;
+  $('#search-count').textContent = `顯示 ${found.length}／${WORDS.length}`;
   $('#word-list').innerHTML = found.length ? found.map(word => {
     const p = getProgress(state, word.id), badge = statusBadge(word);
-    return `<article class="word-row"><span class="word-number">${String(word.id).padStart(2, '0')}</span><div><h3 lang="en">${escape(word.word)}<small>${escape(word.pos)}</small></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}</details></div><div class="row-actions"><span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button></div></article>`;
-  }).join('') : '<div class="empty"><strong>沒有找到這個單字</strong>試試其他英文或中文關鍵字。</div>';
+    return `<article class="word-row"><span class="word-number">${String(word.id).padStart(2, '0')}</span><div><h3 lang="en">${escape(word.word)}<small>${escape(word.pos)}</small></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}</details></div><div class="row-actions"><span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button><button class="study-word" data-study="${word.id}" aria-label="翻卡複習 ${escape(word.word)}">翻卡 ↗</button></div></article>`;
+  }).join('') : '<div class="empty"><strong>沒有符合條件的單字</strong>試試其他關鍵字，或清除學習狀態篩選。</div>';
 }
 const dateLabel = at => /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : new Date(at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 function renderHistory() {
@@ -269,7 +280,17 @@ $('#quiz-result').addEventListener('click', event => {
   }
 });
 $('#search').addEventListener('input', renderLibrary);
+$('#library-filter').addEventListener('change', renderLibrary);
+$('#library-sort').addEventListener('change', renderLibrary);
+$('#clear-library-filters').addEventListener('click', () => { $('#search').value = ''; $('#library-filter').value = 'all'; $('#library-sort').value = 'source'; renderLibrary(); });
 $('#word-list').addEventListener('click', event => {
+  const study = event.target.closest('[data-study]');
+  if (study) {
+    filter = 'all';
+    $$('[data-filter]').forEach(button => button.classList.toggle('selected', button.dataset.filter === filter));
+    position = order.indexOf(Number(study.dataset.study));
+    setView('cards'); refreshCards(Number(study.dataset.study)); $('#flashcard').focus(); return;
+  }
   const button = event.target.closest('[data-star]');
   if (button) { toggleStar(state, Number(button.dataset.star)); save(); renderLibrary(); }
 });
@@ -297,6 +318,7 @@ $('#cancel-reset').addEventListener('click', () => {
   $('#reset-progress').focus();
 });
 $('#confirm-reset').addEventListener('click', () => {
+  if (activeUser) { toast('請先登出，再重設此裝置的訪客紀錄。雲端紀錄不會被刪除。'); return; }
   state = emptyState(); allowSave = true; save(); renderStats(); renderHistory(); refreshCards();
   quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false;
   $('#reset-confirmation').hidden = true; $('#reset-progress').hidden = false;
@@ -304,8 +326,170 @@ $('#confirm-reset').addEventListener('click', () => {
   toast('學習進度已重設。');
 });
 window.addEventListener('storage', event => {
-  if (event.key !== STORAGE_KEY) return;
-  try { state = loadState(localStorage, WORDS); renderStats(); if (currentView === 'cards') refreshCards(); if (currentView === 'library') renderLibrary(); if (currentView === 'progress') renderHistory(); }
+  if (event.key !== activeStorageKey()) return;
+  try { const other = loadState(localStorage, WORDS, activeStorageKey()); state = activeUser ? mergeStates(state, other, WORDS) : other; renderStats(); if (currentView === 'cards') refreshCards(); if (currentView === 'library') renderLibrary(); if (currentView === 'progress') renderHistory(); cloudSync?.schedule(); }
   catch { toast('其他分頁的進度無法讀取，目前的練習仍保留。'); }
 });
-renderStats(); refreshCards();
+function repaintProgress() {
+  renderStats();
+  if (currentView === 'cards') refreshCards(cards[position]?.id);
+  if (currentView === 'library') renderLibrary();
+  if (currentView === 'progress') renderHistory();
+}
+function showAuthMessage(message, error = false) {
+  $('#auth-message').textContent = message;
+  $('#auth-message').hidden = !message;
+  $('#auth-message').classList.toggle('error', error);
+}
+function setAuthMode(mode) {
+  authMode = mode;
+  const recovery = mode === 'recovery', forgot = mode === 'forgot', signup = mode === 'signup';
+  $('#auth-tabs').hidden = recovery;
+  $$('[data-auth-mode]').forEach(button => button.classList.toggle('selected', button.dataset.authMode === mode));
+  $('#auth-email-field').hidden = recovery;
+  $('#auth-email').required = !recovery;
+  $('#auth-password-field').hidden = forgot;
+  $('#auth-password').required = !forgot;
+  $('#auth-password').minLength = mode === 'signin' ? 1 : 8;
+  $('#auth-password').autocomplete = signup || recovery ? 'new-password' : 'current-password';
+  $('#auth-password').value = '';
+  $('#auth-confirm-field').hidden = !signup && !recovery;
+  $('#auth-confirm').required = signup || recovery;
+  $('#auth-confirm').value = '';
+  $('#password-hint').hidden = !signup && !recovery;
+  $('#auth-submit').textContent = { signin: '登入並同步 →', signup: '註冊帳號 →', forgot: '寄送重設密碼信 →', recovery: '更新密碼 →' }[mode];
+  showAuthMessage('');
+}
+function setSyncStatus(phase, detail) {
+  syncPhase = phase; syncDetail = detail;
+  const labels = { guest: '訪客模式', syncing: '同步中…', synced: '已同步至雲端', offline: '離線中 · 等待同步', error: '尚未同步成功' };
+  $('#sync-phase').textContent = labels[phase] || '準備同步';
+  $('#sync-phase').dataset.phase = phase;
+  $('#sync-now').disabled = phase === 'syncing' || !activeUser;
+  $('#cloud-dot').dataset.phase = phase;
+  if (activeUser) $('#account-pill-label').textContent = phase === 'synced' ? '已登入 · 已同步' : phase === 'syncing' ? '正在同步' : phase === 'offline' ? '離線待同步' : '帳號與同步';
+  if (phase === 'synced') {
+    $('#last-sync').textContent = `最近確認 ${new Date(detail).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`;
+    $('#sync-detail').textContent = '清除瀏覽器資料後，再登入同一帳號即可取回已同步紀錄。';
+  } else if (phase === 'error') {
+    $('#sync-detail').textContent = '本次雲端同步未完成。紀錄保留在此裝置，請檢查連線後按「立即同步」重試。';
+  } else if (phase === 'offline') {
+    $('#sync-detail').textContent = '目前先保存在此裝置；網路恢復後會自動重試。';
+  } else $('#sync-detail').textContent = '';
+}
+function renderAccount() {
+  $('#signed-in-account').hidden = !activeUser;
+  $('#auth-section').hidden = !authClient || (!!activeUser && authMode !== 'recovery');
+  $('#account-email').textContent = activeUser?.email || '';
+  $('#account-pill-label').textContent = activeUser ? '帳號與同步' : '帳號登入';
+  $('#storage-label').textContent = activeUser ? '帳號模式 · 自動同步雲端' : '訪客模式 · 進度儲存在此瀏覽器';
+  $('.reset-section').hidden = !!activeUser;
+  const progressDescription = $('#progress-view .progress-panel > div:first-child .muted');
+  progressDescription.textContent = activeUser ? '此帳號啟用雲端同步，也可匯出備份。請確認帳號頁顯示「已同步至雲端」。' : '訪客紀錄保存在此瀏覽器。登入帳號可啟用雲端同步，或先匯出 JSON 備份。';
+  $('#guest-import-offer').hidden = true;
+  if (activeUser) {
+    try {
+      const guest = loadState(localStorage, WORDS);
+      const reviewed = getStats(WORDS, guest).reviewed;
+      const hasStars = Object.values(guest.progress).some(p => p.starred);
+      const hasNew = fingerprint(mergeStates(state, guest, WORDS)) !== fingerprint(state);
+      if (hasNew && (reviewed > 0 || hasStars)) {
+        $('#guest-import-description').textContent = `此瀏覽器另有 ${reviewed} 個單字的訪客紀錄。要加入目前帳號嗎？`;
+        $('#guest-import-offer').hidden = false;
+      }
+    } catch { /* A damaged guest backup must not block an account. */ }
+    setSyncStatus(syncPhase === 'guest' ? 'syncing' : syncPhase, syncDetail);
+  } else setSyncStatus('guest');
+}
+async function activateSession(session, event = '') {
+  const next = session?.user || null;
+  if (activeUser?.id !== next?.id) {
+    cloudSync?.setUser(null);
+    activeUser = next;
+    reviewActor = crypto.randomUUID();
+    syncPhase = 'guest'; syncDetail = undefined; $('#last-sync').textContent = '';
+    try { state = loadState(localStorage, WORDS, activeStorageKey()); allowSave = true; }
+    catch { state = emptyState(); allowSave = false; showAuthMessage('此裝置的進度副本無法讀取；雲端同步會嘗試取回已保存的紀錄。', true); }
+    quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false;
+    repaintProgress();
+    cloudSync?.setUser(next?.id || null);
+  } else if (next) activeUser = next;
+  if (event === 'PASSWORD_RECOVERY') { setAuthMode('recovery'); setView('account'); }
+  else if (authMode === 'recovery' && !next) setAuthMode('signin');
+  renderAccount();
+  if (next) await cloudSync?.sync();
+}
+async function initializeAccounts() {
+  $('#account-loading').hidden = false;
+  try {
+    authClient = await createAccountClient();
+    $('#account-unavailable').hidden = !!authClient;
+    if (!authClient) { renderAccount(); return; }
+    cloudSync = createSyncCoordinator({
+      remote: createRemote(authClient), words: WORDS, getState: () => state,
+      applyState: next => { state = next; allowSave = true; save({ upload: false }); repaintProgress(); renderAccount(); },
+      onStatus: setSyncStatus, isOnline: () => navigator.onLine,
+    });
+    const subscription = authClient.auth.onAuthStateChange((event, session) => {
+      setTimeout(() => { void activateSession(session, event).catch(() => setSyncStatus('error')); }, 0);
+    });
+    authSubscription = subscription.data.subscription;
+    const { data, error } = await authClient.auth.getSession();
+    if (error) throw error;
+    await activateSession(data.session);
+  } catch (error) {
+    showAuthMessage(friendlyAuthError(error), true);
+    if (!authClient) $('#account-unavailable').hidden = false;
+  } finally { $('#account-loading').hidden = true; renderAccount(); }
+}
+$$('[data-auth-mode]').forEach(button => button.addEventListener('click', () => setAuthMode(button.dataset.authMode)));
+$('#auth-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!authClient || authBusy) return;
+  if ((authMode === 'signup' || authMode === 'recovery') && $('#auth-password').value !== $('#auth-confirm').value) { showAuthMessage('兩次輸入的密碼不同，請再確認。', true); return; }
+  authBusy = true; $('#auth-submit').disabled = true; showAuthMessage('處理中…');
+  const email = $('#auth-email').value.trim(), password = $('#auth-password').value;
+  const redirectTo = new URL('./', location.href).href;
+  try {
+    if (authMode === 'forgot') {
+      const { error } = await authClient.auth.resetPasswordForEmail(email, { redirectTo }); if (error) throw error;
+      showAuthMessage('如果這個 Email 已註冊，將收到重設密碼信。請檢查收件匣與垃圾郵件。');
+    } else if (authMode === 'recovery') {
+      const { error } = await authClient.auth.updateUser({ password }); if (error) throw error;
+      setAuthMode('signin'); renderAccount(); showAuthMessage('密碼已更新。');
+    } else if (authMode === 'signup') {
+      const { data, error } = await authClient.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } }); if (error) throw error;
+      if (data.session) { await activateSession(data.session); showAuthMessage('帳號已建立，已啟用雲端同步。'); }
+      else showAuthMessage('請檢查 Email，點選驗證信中的連結後再登入。若已註冊，可改用登入或忘記密碼。');
+    } else {
+      const { data, error } = await authClient.auth.signInWithPassword({ email, password }); if (error) throw error;
+      await activateSession(data.session); showAuthMessage('已登入。請確認上方的同步狀態。');
+    }
+  } catch (error) { showAuthMessage(friendlyAuthError(error), true); }
+  finally { authBusy = false; $('#auth-submit').disabled = false; $('#auth-password').value = ''; $('#auth-confirm').value = ''; }
+});
+$('#sync-now').addEventListener('click', () => { void cloudSync?.sync(); });
+$('#sign-out').addEventListener('click', async () => {
+  if (!authClient || authBusy) return;
+  authBusy = true; $('#sign-out').disabled = true;
+  try {
+    await cloudSync?.sync();
+    const { error } = await authClient.auth.signOut({ scope: 'local' }); if (error) throw error;
+    await activateSession(null); setAuthMode('signin'); showAuthMessage('已登出。現在顯示這個瀏覽器的訪客進度。');
+  } catch (error) { showAuthMessage(friendlyAuthError(error), true); }
+  finally { authBusy = false; $('#sign-out').disabled = false; }
+});
+$('#merge-guest').addEventListener('click', async () => {
+  if (!activeUser || !cloudSync) return;
+  try {
+    state = mergeStates(state, loadState(localStorage, WORDS), WORDS); allowSave = true; save(); repaintProgress(); renderAccount();
+    const success = await cloudSync.sync();
+    toast(success ? '訪客紀錄已加入帳號並同步。' : '訪客紀錄已加入此帳號的本機副本，等待雲端同步。');
+  } catch { showAuthMessage('訪客紀錄無法讀取。請先匯出備份，原有帳號紀錄仍保留。', true); }
+});
+window.addEventListener('online', () => { cloudSync?.schedule(0); });
+window.addEventListener('offline', () => { if (activeUser) setSyncStatus('offline'); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && activeUser) cloudSync?.schedule(0); });
+setInterval(() => { if (!document.hidden && activeUser) cloudSync?.schedule(0); }, 45000);
+setAuthMode('signin'); renderStats(); refreshCards(); renderAccount();
+void initializeAccounts();

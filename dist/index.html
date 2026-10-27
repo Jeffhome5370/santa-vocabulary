@@ -20,12 +20,13 @@
       <button class="nav-item" data-view="quiz"><span aria-hidden="true">◈</span>選擇題<span class="nav-en">QUIZ</span></button>
       <button class="nav-item" data-view="library"><span aria-hidden="true">☷</span>單字庫<span class="nav-en">WORDS</span></button>
       <button class="nav-item" data-view="progress"><span aria-hidden="true">◴</span>學習紀錄<span class="nav-en">RECORD</span></button>
+      <button class="nav-item" data-view="account"><span aria-hidden="true">☁</span>帳號與同步<span class="nav-en">CLOUD</span></button>
     </nav>
     <div class="sidebar-note"><span class="tiny-star">✳</span><p>不急著記住全部，<br>今天比昨天多一點。</p><span class="small-label">A LITTLE, EVERY DAY.</span></div>
-    <div class="storage-note"><span class="status-dot"></span>進度儲存在這個瀏覽器</div>
+    <div class="storage-note" id="storage-label"><span class="status-dot"></span>訪客模式 · 進度儲存在此瀏覽器</div>
   </aside>
   <div class="workspace">
-    <header class="topbar"><span class="breadcrumb">我的學習集 <span>/</span> <strong>Santa 單字</strong></span><span class="top-tag">EN <span>→</span> 繁中</span></header>
+    <header class="topbar"><span class="breadcrumb">我的學習集 <span>/</span> <strong>Santa 單字</strong></span><button class="account-pill" data-view="account"><span class="status-dot" id="cloud-dot"></span><span id="account-pill-label">帳號登入</span></button></header>
     <main id="main" tabindex="-1">
       <div class="page-heading"><div><p class="eyebrow">YOUR DAILY WORD PRACTICE</p><h1 id="page-title">每天，記住一點<span class="orange">。</span></h1><p id="page-description" class="subtitle">翻一張卡，讓一個單字變熟悉。</p></div><div class="collection-tag"><span class="collection-icon">▱</span><span>Santa 單字集<strong id="deck-count">86 個單字</strong></span></div></div>
       <div id="stats" class="stats" aria-label="學習概況"></div>
@@ -45,8 +46,24 @@
         <div id="quiz-active" class="panel" hidden><div class="quiz-meta"><span id="quiz-position" class="eyebrow"></span><button id="end-quiz" class="text-button">結束本回</button></div><div class="quiz-track"><span id="quiz-bar"></span></div><p id="quiz-prompt" class="small-label"></p><h2 id="quiz-word" class="quiz-word"></h2><div id="quiz-options" class="quiz-options"></div><div id="quiz-feedback" class="quiz-feedback" role="status" hidden></div><button id="quiz-next" class="button primary" hidden>下一題 →</button></div>
         <div id="quiz-result" class="panel result" hidden></div>
       </section>
-      <section id="library-view" class="view" aria-label="單字庫" hidden><div class="library-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜尋英文、中文或用法…" aria-label="搜尋單字"></label><span id="search-count" class="muted"></span></div><div id="word-list" class="word-list"></div></section>
+      <section id="library-view" class="view" aria-label="單字庫" hidden>
+        <div class="library-overview"><div><p class="eyebrow">THE COMPLETE COLLECTION</p><h2>目前收錄 <strong id="library-total">86</strong> 個單字</h2><p>瀏覽完整清單，展開例句，或直接挑一個單字翻卡複習。</p></div><span class="library-book" aria-hidden="true">☷</span></div>
+        <div class="library-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜尋英文、中文或用法…" aria-label="搜尋單字"></label><span id="search-count" class="muted"></span></div>
+        <div class="library-filters"><label>學習狀態<select id="library-filter"><option value="all">全部單字</option><option value="known">已熟悉</option><option value="weak">待加強</option><option value="new">尚未複習</option><option value="starred">已收藏</option></select></label><label>排序<select id="library-sort"><option value="source">原始順序</option><option value="az">英文 A–Z</option><option value="za">英文 Z–A</option></select></label><button id="clear-library-filters" class="text-button">清除篩選</button></div>
+        <div id="word-list" class="word-list"></div>
+      </section>
       <section id="progress-view" class="view" aria-label="學習紀錄" hidden><div class="panel progress-panel"><div><p class="eyebrow">LITTLE STEPS ADD UP</p><h2>每次練習，都算數。</h2><p class="muted">紀錄保存在目前的瀏覽器。更換裝置時，先匯出備份再匯入。</p></div><div class="backup-actions"><button id="export-json" class="button primary">匯出進度 JSON ↓</button><button id="export-md" class="button outline">匯出複習筆記 MD ↓</button><label class="button outline import-label">匯入進度 ↑<input id="import-progress" type="file" accept="application/json,.json" class="visually-hidden"></label></div><p class="fine-print">匯入會合併紀錄；相同單字採用較新的狀態，不會重複計算次數。網頁進度不會自動回寫電腦上的 Markdown。</p><h3>最近的練習</h3><div id="recent-history"></div><details class="reset-section"><summary>管理此瀏覽器的資料</summary><p>重設後可用先前匯出的 JSON 恢復。</p><button id="reset-progress" class="button danger">重設學習進度</button><div id="reset-confirmation" class="reset-confirmation" role="group" aria-label="確認重設學習進度" hidden><p>確定清除所有學習進度與收藏嗎？請先匯出 JSON 備份。</p><button id="confirm-reset" class="button danger">確認重設</button> <button id="cancel-reset" class="button outline">保留資料</button></div></details></div></section>
+      <section id="account-view" class="view" aria-label="帳號與雲端同步" hidden>
+        <div class="panel account-panel"><div class="account-heading"><span class="large-symbol">☁</span><div><p class="eyebrow">YOUR WORDS, WHEREVER YOU GO</p><h2>讓練習紀錄，跟著你走。</h2><p class="muted">登入後同步熟悉程度、收藏與複習紀錄，換裝置也能繼續。</p></div></div>
+          <div id="account-unavailable" class="account-notice" hidden>帳號登入尚未開放。目前仍可使用全部單字與訪客練習；請先匯出 JSON 備份保存進度。</div>
+          <div id="account-loading" class="account-notice">正在連接帳號服務…</div>
+          <div id="signed-in-account" hidden><p class="field-label">目前登入的帳號</p><strong id="account-email"></strong><div class="sync-status" role="status"><span id="sync-phase">準備同步</span><span id="last-sync" class="muted"></span></div><p id="sync-detail" class="fine-print"></p><div class="account-actions"><button id="sync-now" class="button primary">立即同步</button><button id="sign-out" class="button outline">登出</button></div><div id="guest-import-offer" class="account-notice" hidden><p id="guest-import-description"></p><button id="merge-guest" class="button outline">將訪客紀錄加入我的帳號</button><p class="fine-print">只有按下此按鈕才會合併，原本的訪客備份會保留。</p></div></div>
+          <div id="auth-section" hidden><div id="auth-tabs" class="segments auth-tabs" role="group" aria-label="帳號操作"><button type="button" class="selected" data-auth-mode="signin">登入</button><button type="button" data-auth-mode="signup">註冊帳號</button><button type="button" data-auth-mode="forgot">忘記密碼</button></div><form id="auth-form" class="auth-form"><label id="auth-email-field">Email<input id="auth-email" name="email" type="email" autocomplete="username" maxlength="254" required></label><label id="auth-password-field">密碼<input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required><small id="password-hint" hidden>至少 8 個字元；請使用獨立且不易猜測的密碼。</small></label><label id="auth-confirm-field" hidden>確認密碼<input id="auth-confirm" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128"></label><button id="auth-submit" class="button primary" type="submit">登入並同步 →</button></form></div>
+          <p class="muted small">目前註冊驗證信僅開放寄送至專案團隊授權的 Email；其他使用者需等待管理者開放寄信服務。</p>
+          <p id="auth-message" class="auth-message" role="status" hidden></p>
+          <div class="account-privacy"><strong>你可以放心繼續練習。</strong><p>訪客紀錄只存在此瀏覽器。登入後，各帳號的雲端紀錄分開保存；只有選擇合併時，訪客紀錄才會加入帳號。網路中斷時會先保留在本機，恢復連線後再同步。</p></div>
+        </div>
+      </section>
       <footer><span>一步一步，單字會留下來。</span><span>86 WORDS · ENDLESS POSSIBILITIES</span><a href="https://quizlet.com/tw/1215722156/santa%E5%96%AE%E5%AD%97-flash-cards/" target="_blank" rel="noreferrer">原始單字集 ↗</a></footer>
     </main>
   </div>

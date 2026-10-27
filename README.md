@@ -1,6 +1,6 @@
 # Santa 單字室
 
-86 個英文單字的翻字卡與四選一複習網站。介面使用繁體中文，支援手機與桌面，無需安裝前端依賴。
+86 個英文單字的翻字卡與四選一複習網站。介面使用繁體中文，支援手機與桌面，靜態網頁可部署於 GitHub Pages。
 
 **線上使用：[Santa 單字室](https://jeffhome5370.github.io/santa-vocabulary/)**
 
@@ -12,9 +12,36 @@
 - 每個單字有詞性、中文意思、原創英文例句與中文翻譯。
 - 標記「已熟悉／待加強」，篩選尚未複習、待加強、收藏，以及隨機排序。
 - 每回 10 題四選一；優先安排錯題，再安排尚未複習的單字。每題作答後立即提供正解與例句。
-- 單字庫可搜尋英文、中文與用法。
-- 使用瀏覽器 localStorage 保存進度；支援 JSON 匯出／匯入及 Markdown 複習紀錄匯出。
-- JSON 匯入依各單字的更新時間合併，同一檔案重複匯入不會增加複習次數。
+- 單字庫完整列出 86 個單字，可搜尋英文、中文與用法，依熟悉程度／收藏篩選、A–Z 排序，並直接進入指定字卡。
+- Supabase Email 註冊、登入、忘記密碼與密碼重設流程；需完成下方雲端服務設定才能啟用。
+- 訪客進度儲存在瀏覽器；登入後，帳號紀錄自動同步至 Supabase，各帳號分開保存。
+- 訪客紀錄須經使用者主動選擇，才會合併至登入的帳號。
+- 支援 JSON 匯出／匯入及 Markdown 複習紀錄匯出；舊版 v1 備份會自動轉換為 v2。
+- 多裝置以獨立計數器合併作答次數；重複同步／匯入不會重複計算。熟悉程度與收藏各按其更新時間合併。
+
+## 啟用帳號登入與雲端儲存
+
+正式網站已連接 Supabase 專案 `igpgvylzfnbdfcvktjww`（Tokyo），資料庫、RLS 與公開設定已完成，並已啟用 Email 帳號流程。Site URL 與允許返回網址均為上方 GitHub Pages 網址。預設寄信目前僅接受專案團隊授權的 Email；開放一般使用者註冊前，管理者仍須設定自訂 SMTP。個人密碼與驗證步驟由使用者自行完成。
+
+以下步驟供重新部署至其他專案時使用。未填公開設定時，介面會明確顯示「帳號登入尚未開放」，訪客功能照常運作。
+
+1. 在自己的 Supabase 專案執行 [資料庫 migration](supabase/migrations/202610270001_progress.sql)。它建立每個使用者一列的私有進度資料、RLS 政策及具有版本檢查的同步函式。
+2. 在 **Authentication → URL Configuration** 將 Site URL 設為 `https://jeffhome5370.github.io/santa-vocabulary/`，並將同一網址加入 Redirect URLs。使用其他部署網址時同步修改。
+3. 在 **Authentication → Providers** 啟用 Email／Password，保留 Email 驗證。要對外開放註冊與寄送重設密碼信，應依 Supabase 文件設定自己的 SMTP；預設寄信服務限制收件人與速率，不適合作為公開網站的完整寄信服務。
+4. 取得 Project URL 與 publishable key，填入 `dist/config.js`。舊式 `anon` key 也支援。這兩個值是瀏覽器公開設定，資料保護依靠登入 JWT 與資料庫 RLS。
+5. **不要放入 `service_role`、`sb_secret_`、資料庫密碼或管理員 token。**
+6. 部署後用自己控制的 Email 完成註冊、驗證與登入。確認顯示「已同步至雲端」，再於另一瀏覽器登入確認進度；測試帳號 A 看不到帳號 B 的紀錄。
+
+```js
+export const CLOUD_CONFIG = Object.freeze({
+  supabaseUrl: 'https://YOUR_PROJECT.supabase.co',
+  publishableKey: 'sb_publishable_YOUR_PUBLIC_KEY',
+});
+```
+
+資料庫 migration 可重複執行，不會清空現有資料。SQL 使用 `auth.uid()` 限定帳號，匿名訪客無讀寫權限；同步使用原子版本檢查與重試，避免覆蓋另一裝置剛寫入的紀錄。
+
+參考：[Supabase Email 登入](https://supabase.com/docs/guides/auth/passwords)、[API keys](https://supabase.com/docs/guides/api/api-keys)、[Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)。
 
 ## 本機預覽
 
@@ -30,14 +57,15 @@ python -m http.server 4173 --bind 127.0.0.1 --directory dist
 
 ## 檢查
 
-需要 Node.js 22 或更新版本。沒有 npm 依賴，不需執行 `npm install`。
+需要 Node.js 22 或更新版本。測試使用 PGlite 在記憶體中執行真正的 PostgreSQL migration，不會連線至正式資料庫。
 
 ```powershell
+npm ci
 npm test
 npm run check
 ```
 
-測試涵蓋字卡完整性、每題選項唯一性、錯題優先順序、進度統計、重複備份匯入與損壞資料處理。
+測試涵蓋字卡、題目、舊備份轉換、多裝置計數、併發同步、離線與伺服器錯誤、帳號切換競態，以及資料庫的匿名拒絕、帳號隔離與舊版本寫入拒絕。這些測試不取代正式專案的註冊、寄信與登入驗證。
 
 ## GitHub Pages 部署
 
@@ -78,12 +106,15 @@ python scripts/build_data.py --source "..\Santa單字.md"
 ## 進度與資料
 
 - 公開網站只有單字內容，不內建個人複習歷史。
-- 進度不會上傳 GitHub，也不會自動同步裝置或回寫本機 Markdown。
-- 需要跨裝置時，在學習紀錄匯出 JSON，再於新裝置匯入。
+- 訪客進度不會上傳雲端；登入且顯示同步成功後，帳號紀錄才已保存到 Supabase。
+- 清除瀏覽器資料後，登入同一帳號即可取回已同步紀錄。尚未同步、離線新增或訪客紀錄仍需先匯出 JSON。
+- 進度不會寫入公開 GitHub 儲存庫，也不會自動回寫本機 Markdown。
+- 各帳號的本機快取分開保存，登出後切回訪客紀錄。網頁提供的重設只清除訪客進度，不會刪除雲端資料。
 - 目前保留最近 500 筆逐次紀錄；各單字累計複習次數仍會保留。測驗正確率以保留的選擇題紀錄計算，不包含翻卡自評。
 - 請在清除瀏覽器資料前備份；隱私模式可能不保留進度。
 - 「已熟悉」代表最近一次答對或自評熟悉，不代表永久掌握。
 - 英文朗讀依瀏覽器與裝置語音支援；部分裝置可能需要網路。
-- 字體使用 Google Fonts；無法連線時會使用系統字體。其餘網站功能無需第三方 API。
+- 字體使用 Google Fonts，無法連線時使用系統字體。設定雲端功能後，登入時會載入固定版本的 Supabase JS SDK（2.118.0，jsDelivr），並連線至設定的 Supabase 專案。
+- 累計次數以每個頁面／帳號練習階段的獨立計數器合併，超過 500 筆的舊歷史不影響總次數。每個帳號狀態限制為 2 MB，以免異常檔案造成過量儲存。
 
 來源：[Quizlet「Santa單字」](https://quizlet.com/tw/1215722156/santa%E5%96%AE%E5%AD%97-flash-cards/)。保留原筆記的學習註記，修正 recurrence、courtesy 與 Highness 等容易記錯的條目。
