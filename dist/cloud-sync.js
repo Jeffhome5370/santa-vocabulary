@@ -27,7 +27,7 @@ export function createRemote(client) {
     async load(userId) {
       const { data, error } = await request(client.from('santa_progress').select('state,revision').eq('user_id', userId).maybeSingle());
       if (error) throw error;
-      return data || { state: emptyState(), revision: 0 };
+      return data || { state: emptyState(false), revision: 0 };
     },
     async save(userId, revision, state) {
       const { data, error } = await request(client.rpc('sync_santa_progress', { p_expected_user_id: userId, p_base_revision: revision, p_state: state }));
@@ -50,7 +50,7 @@ export function createSyncCoordinator({ remote, words, getState, applyState, onS
       if (!isCurrent(id, generation)) return false;
       for (let attempt = 0; attempt < 6; attempt++) {
         const remoteState = validateState(remoteData.state, words);
-        const candidate = mergeStates(getState(), remoteState, words);
+        const candidate = mergeStates({ ...getState(), includeBaseWords: remoteState.includeBaseWords }, remoteState, words);
         if (!isCurrent(id, generation)) return false;
         if (fingerprint(candidate) === fingerprint(remoteState)) {
           applyState(candidate);
@@ -61,7 +61,7 @@ export function createSyncCoordinator({ remote, words, getState, applyState, onS
         if (!isCurrent(id, generation)) return false;
         if (result.applied) {
           const acknowledged = validateState(result.state, words);
-          const merged = mergeStates(getState(), acknowledged, words);
+          const merged = mergeStates({ ...getState(), includeBaseWords: acknowledged.includeBaseWords }, acknowledged, words);
           applyState(merged);
           // Local edits during this request may require one more server round.
           if (fingerprint(merged) !== fingerprint(acknowledged)) rerun = true;

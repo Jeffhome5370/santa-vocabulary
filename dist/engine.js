@@ -1,7 +1,13 @@
 export const LEGACY_STORAGE_KEY = 'santa-vocabulary.progress.v1';
 export const STORAGE_KEY = 'santa-vocabulary.progress.v2';
-export const emptyState = () => ({ version: 2, progress: {}, history: [], customWords: [] });
-export const allWords = (base, state) => [...base, ...(state.customWords || [])];
+export const emptyState = (includeBaseWords = true) => ({ version: 2, progress: {}, history: [], customWords: [], includeBaseWords });
+export const allWords = (base, state) => [...(state.includeBaseWords === false ? [] : base), ...(state.customWords || [])];
+export const visibleHistory = (words, state) => { const ids = new Set(words.map(word => word.id)); return state.history.filter(entry => ids.has(entry.wordId)); };
+export function guestForAccount(guest, account) {
+  if (account.includeBaseWords !== false) return guest;
+  const ids = new Set(guest.customWords.map(word => word.id));
+  return { ...guest, includeBaseWords: false, progress: Object.fromEntries(Object.entries(guest.progress).filter(([id]) => ids.has(Number(id)))), history: guest.history.filter(entry => ids.has(entry.wordId)) };
+}
 const normalize = value => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
 export function validateCustomWords(input, base) {
   if (input === undefined) return [];
@@ -65,7 +71,7 @@ export function matchesFilter(word, state, filter) {
 }
 export function getStats(words, state) {
   const progress = words.map(word => getProgress(state, word.id));
-  const quiz = state.history.filter(entry => entry.source === 'quiz');
+  const quiz = visibleHistory(words, state).filter(entry => entry.source === 'quiz');
   return { total: words.length, reviewed: progress.filter(p => p.reviews > 0).length, known: progress.filter(p => p.lastCorrect === true).length, weak: progress.filter(p => p.lastCorrect === false).length, accuracy: quiz.length ? Math.round(quiz.filter(entry => entry.correct).length / quiz.length * 100) : null };
 }
 export function selectQuizWords(words, state, count = 10) {
@@ -93,6 +99,12 @@ export function createQuestion(word, words, direction = 'en') {
   if (distractors.length !== 3) throw new Error('單字數量不足以產生四個不同選項。');
   return { word, direction: actualDirection, prompt: actualDirection === 'en' ? word.word : word.meaning, options: shuffle([word, ...distractors]).map(w => ({ id: w.id, text: value(w) })) };
 }
+export function quizCandidates(words, direction = 'en') {
+  return words.filter(word => {
+    try { for (const selected of direction === 'mixed' ? ['en', 'zh'] : [direction]) createQuestion(word, words, selected); return true; }
+    catch { return false; }
+  });
+}
 export function validateState(input, words) {
   const fail = () => { throw new Error('進度檔格式不正確，請選擇由 Santa 單字室匯出的 JSON。'); };
   if (!input || ![1, 2].includes(input.version) || typeof input.progress !== 'object' || !input.progress || Array.isArray(input.progress) || !Array.isArray(input.history) || input.history.length > 500) fail();
@@ -100,6 +112,8 @@ export function validateState(input, words) {
   const ids = new Set([...words, ...customWords].map(w => w.id));
   const isDate = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
   const safe = emptyState();
+  if (input.includeBaseWords !== undefined && typeof input.includeBaseWords !== 'boolean') fail();
+  safe.includeBaseWords = input.includeBaseWords ?? true;
   safe.customWords = customWords;
   for (const [key, p] of Object.entries(input.progress)) {
     if (!/^\d+$/.test(key) || !ids.has(Number(key)) || !p || typeof p !== 'object') fail();
@@ -131,13 +145,14 @@ export function validateState(input, words) {
 export function mergeStates(current, incoming, words) {
   const a = validateState(current, words), b = validateState(incoming, words);
   const result = emptyState();
+  result.includeBaseWords = a.includeBaseWords;
   const custom = new Map();
   for (const word of [...a.customWords, ...b.customWords]) {
     const existing = custom.get(word.id);
     if (!existing || JSON.stringify(word) > JSON.stringify(existing)) custom.set(word.id, word);
   }
   result.customWords = validateCustomWords([...custom.values()], words);
-  for (const word of allWords(words, result)) {
+  for (const word of [...words, ...result.customWords]) {
     const left = a.progress[word.id], right = b.progress[word.id];
     if (!left && !right) continue;
     if (!left || !right) { result.progress[word.id] = left || right; continue; }

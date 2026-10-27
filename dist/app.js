@@ -1,5 +1,5 @@
 import { WORDS as BASE_WORDS } from './data.js';
-import { STORAGE_KEY, emptyState, allWords, addCustomWord, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, validateState, mergeStates, loadState } from './engine.js';
+import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
 import { createAccountClient, friendlyAuthError } from './account.js';
 import { createRemote, createSyncCoordinator, fingerprint } from './cloud-sync.js';
 
@@ -13,6 +13,7 @@ let quiz = null, toastTimer;
 let authClient = null, cloudSync = null, activeUser = null, authMode = 'signin', authBusy = false, authSubscription = null;
 let reviewActor = crypto.randomUUID();
 let syncPhase = 'guest', syncDetail;
+let authReady = false, libraryReady = false;
 const accountStorageKey = id => `${STORAGE_KEY}.user.${id}`;
 const activeStorageKey = () => activeUser ? accountStorageKey(activeUser.id) : STORAGE_KEY;
 
@@ -37,15 +38,19 @@ catch {
   setTimeout(() => toast('原有進度無法讀取，目前以暫存模式練習。請匯出備份或匯入有效檔案；重設後可恢復儲存。', 12000), 0);
 }
 function renderStats() {
-  WORDS = allWords(BASE_WORDS, state);
+  const ready = authReady && (!activeUser || libraryReady);
+  WORDS = ready ? allWords(BASE_WORDS, state) : [];
   const ids = new Set(WORDS.map(word => word.id));
   order = [...order.filter(id => ids.has(id)), ...WORDS.filter(word => !order.includes(word.id)).map(word => word.id)];
   const stats = getStats(WORDS, state);
-  $('#stats').innerHTML = `<div class="stat"><span class="stat-label">單字總數</span><strong>${stats.total}</strong><small>個單字</small></div><div class="stat"><span class="stat-label">已熟悉</span><strong>${stats.known}</strong><small>/ ${stats.total}</small><span class="stat-bar"><i style="width:${stats.known / stats.total * 100}%"></i></span></div><div class="stat weak"><span class="stat-label">待加強</span><strong>${stats.weak}</strong><small>個單字</small></div><div class="stat"><span class="stat-label">測驗正確率</span><strong>${stats.accuracy === null ? '—' : `${stats.accuracy}%`}</strong></div>`;
+  $('#stats').innerHTML = `<div class="stat"><span class="stat-label">單字總數</span><strong>${stats.total}</strong><small>個單字</small></div><div class="stat"><span class="stat-label">已熟悉</span><strong>${stats.known}</strong><small>/ ${stats.total}</small><span class="stat-bar"><i style="width:${stats.total ? stats.known / stats.total * 100 : 0}%"></i></span></div><div class="stat weak"><span class="stat-label">待加強</span><strong>${stats.weak}</strong><small>個單字</small></div><div class="stat"><span class="stat-label">測驗正確率</span><strong>${stats.accuracy === null ? '—' : `${stats.accuracy}%`}</strong></div>`;
   $('#all-count').textContent = WORDS.length;
   $('#weak-count').textContent = stats.weak;
   $('#deck-count').textContent = `${WORDS.length} 個單字`;
   $('#footer-count').textContent = `${WORDS.length} WORDS · ENDLESS POSSIBILITIES`;
+  $('#start-quiz').disabled = !ready || WORDS.length < 4;
+  $('#open-add-word').disabled = !ready;
+  $('#quiz-availability').textContent = !ready ? '正在載入你的單字庫…' : WORDS.length < 4 ? `目前 ${WORDS.length} 個單字；加入至少 4 個英文與意思各不相同的單字後，即可開始四選一。` : '優先安排待加強與尚未複習的單字。';
 }
 function statusBadge(word) {
   const p = getProgress(state, word.id);
@@ -64,7 +69,11 @@ function renderCard() {
   $('#card-stage').hidden = empty;
   $('#card-actions').hidden = empty;
   if (empty) {
-    const messages = { weak: ['目前沒有待加強的單字', '標記「還不熟」或在測驗中答錯後，就會出現在這裡。'], new: ['全部都複習過了！', '可以切換「待加強」或做一回選擇題。'], starred: ['收藏還是空的', '點字卡右上角的星號，把想多看幾次的單字留下來。'], all: ['沒有單字', '請重新載入網頁。'] };
+    if (!WORDS.length) {
+      $('#empty-cards').innerHTML = !authReady || (activeUser && !libraryReady) ? '<strong>正在載入你的單字庫…</strong>' : '<strong>你的單字庫還是空的</strong>到「單字庫」按「＋ 新增單字」，開始建立自己的字卡。<button class="button primary" id="empty-add-word">新增第一個單字 →</button>';
+      return;
+    }
+    const messages = { weak: ['目前沒有待加強的單字', '標記「還不熟」或在測驗中答錯後，就會出現在這裡。'], new: ['全部都複習過了！', '可以切換「待加強」或做一回選擇題。'], starred: ['收藏還是空的', '點字卡右上角的星號，把想多看幾次的單字留下來。'], all: ['沒有單字', '到單字庫新增第一個單字。'] };
     const [title, body] = messages[filter];
     $('#empty-cards').innerHTML = `<strong>${title}</strong>${body}`;
     return;
@@ -132,7 +141,7 @@ function setView(view) {
     button.classList.toggle('active', active);
     if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
   });
-  const headings = { cards: ['每天，記住一點', '翻一張卡，讓一個單字變熟悉。'], quiz: ['把記憶，練成直覺', '每回 10 題，讓熟悉變得更確定。'], library: ['你的單字，一頁收藏', '目前有哪些單字，在這裡一次看清楚。'], progress: ['每一次，都有累積', '回頭看看，你已經走了多遠。'], account: ['每一份努力，都帶得走', '登入帳號，讓手機與電腦接續同一份進度。'] };
+  const headings = { cards: ['每天，記住一點', '翻一張卡，讓一個單字變熟悉。'], quiz: ['把記憶，練成直覺', '每回最多 10 題，讓熟悉變得更確定。'], library: ['你的單字，一頁收藏', '目前有哪些單字，在這裡一次看清楚。'], progress: ['每一次，都有累積', '回頭看看，你已經走了多遠。'], account: ['每一份努力，都帶得走', '登入帳號，讓手機與電腦接續同一份進度。'] };
   $('#page-title').innerHTML = `${headings[view][0]}<span class="orange">。</span>`;
   $('#page-description').textContent = headings[view][1];
   if (view === 'cards') refreshCards(cards[position]?.id);
@@ -140,7 +149,10 @@ function setView(view) {
   if (view === 'progress') renderHistory();
 }
 function startQuiz() {
-  quiz = { words: selectQuizWords(WORDS, state), direction: $('#quiz-direction').value, index: 0, answers: [], question: null, answered: false };
+  const direction = $('#quiz-direction').value;
+  const eligible = quizCandidates(WORDS, direction);
+  if (!eligible.length) { toast('請先加入至少 4 個英文與意思各不相同的單字，再開始四選一。'); return; }
+  quiz = { words: selectQuizWords(eligible, state), direction, index: 0, answers: [], question: null, answered: false };
   $('#quiz-setup').hidden = true;
   $('#quiz-result').hidden = true;
   $('#quiz-active').hidden = false;
@@ -195,16 +207,17 @@ function renderLibrary() {
   const found = WORDS.filter(word => `${word.word} ${word.meaning} ${word.note} ${word.example} ${word.translation}`.toLowerCase().includes(query) && (selected === 'custom' ? word.id >= 1_000_000 : selected === 'known' ? getProgress(state, word.id).lastCorrect === true : matchesFilter(word, state, selected)));
   if ($('#library-sort').value !== 'source') found.sort((a, b) => a.word.localeCompare(b.word, 'en') * ($('#library-sort').value === 'az' ? 1 : -1));
   $('#library-total').textContent = WORDS.length;
-  $('#custom-word-count').textContent = `原始 ${BASE_WORDS.length} 個 · 自訂 ${state.customWords?.length || 0} 個`;
+  $('#custom-word-count').textContent = state.includeBaseWords === false ? `個人單字庫 · ${state.customWords?.length || 0} 個單字` : `原始 ${BASE_WORDS.length} 個 · 自訂 ${state.customWords?.length || 0} 個`;
   $('#search-count').textContent = `顯示 ${found.length}／${WORDS.length}`;
   $('#word-list').innerHTML = found.length ? found.map(word => {
     const p = getProgress(state, word.id), badge = statusBadge(word);
     return `<article class="word-row"><span class="word-number">${word.id >= 1_000_000 ? '自訂' : String(word.id).padStart(2, '0')}</span><div><h3 lang="en">${escape(word.word)}<small>${escape(word.pos)}</small></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}${!word.example && !word.translation && !word.note ? '<p>尚未填寫例句或用法。</p>' : ''}</details></div><div class="row-actions"><span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button><button class="study-word" data-study="${word.id}" aria-label="翻卡複習 ${escape(word.word)}">翻卡 ↗</button></div></article>`;
-  }).join('') : '<div class="empty"><strong>沒有符合條件的單字</strong>試試其他關鍵字，或清除學習狀態篩選。</div>';
+  }).join('') : WORDS.length ? '<div class="empty"><strong>沒有符合條件的單字</strong>試試其他關鍵字，或清除學習狀態篩選。</div>' : '<div class="empty"><strong>你的單字庫還是空的</strong>按上方「＋ 新增單字」，加入自己的第一個單字。</div>';
 }
 const dateLabel = at => /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : new Date(at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 function renderHistory() {
-  $('#recent-history').innerHTML = state.history.length ? state.history.slice(0, 30).map(entry => {
+  const history = visibleHistory(WORDS, state);
+  $('#recent-history').innerHTML = history.length ? history.slice(0, 30).map(entry => {
     const word = WORDS.find(w => w.id === entry.wordId);
     return `<div class="history-row"><strong>${entry.correct ? '✓' : '↻'} ${escape(word.word)}</strong><span>${entry.source === 'quiz' ? '選擇題' : '翻字卡'} · ${entry.correct ? (entry.source === 'quiz' ? '答對' : '已熟悉') : '待加強'} · ${dateLabel(entry.at)}</span></div>`;
   }).join('') : '<p class="muted">還沒有練習紀錄。從一張字卡開始吧。</p>';
@@ -222,7 +235,7 @@ function exportMarkdown() {
     return `| ${word.word} | ${word.meaning.replaceAll('|', '／')} | ${p.reviews} | ${p.lastCorrect === null ? '尚未複習' : p.lastCorrect ? '已熟悉' : '待加強'} | ${p.lastReviewed ? new Date(p.lastReviewed).toLocaleDateString('zh-TW') : '—'} |`;
   });
   const stats = getStats(WORDS, state);
-  const history = state.history.map(entry => `| ${new Date(entry.at).toLocaleString('zh-TW')} | ${WORDS.find(w => w.id === entry.wordId).word} | ${entry.source === 'quiz' ? '四選一' : '翻字卡'} | ${entry.correct ? (entry.source === 'quiz' ? '答對' : '已熟悉') : '待加強'} |`);
+  const history = visibleHistory(WORDS, state).map(entry => `| ${new Date(entry.at).toLocaleString('zh-TW')} | ${WORDS.find(w => w.id === entry.wordId).word} | ${entry.source === 'quiz' ? '四選一' : '翻字卡'} | ${entry.correct ? (entry.source === 'quiz' ? '答對' : '已熟悉') : '待加強'} |`);
   download(`santa-review-${today()}.md`, `# Santa 單字複習紀錄\n\n匯出日期：${today()}\n\n已複習 ${stats.reviewed}／${stats.total} 筆；待加強 ${stats.weak} 筆。\n\n| 單字 | 意思 | 複習次數 | 最近狀態 | 最近複習 |\n| --- | --- | --- | --- | --- |\n${rows.join('\n')}\n\n## 最近紀錄（最多 500 筆）\n\n| 日期 | 單字 | 題型 | 結果 |\n| --- | --- | --- | --- |\n${history.join('\n')}\n`, 'text/markdown;charset=utf-8');
 }
 
@@ -267,6 +280,7 @@ document.addEventListener('keydown', event => {
   else if (event.key === 'ArrowRight') { event.preventDefault(); moveCard(1); }
 });
 $('#start-quiz').addEventListener('click', startQuiz);
+$('#empty-cards').addEventListener('click', event => { if (event.target.closest('#empty-add-word')) { setView('library'); $('#open-add-word').click(); } });
 $('#quiz-options').addEventListener('click', event => {
   const button = event.target.closest('[data-choice]');
   if (button && !button.disabled) answerQuiz(Number(button.dataset.choice));
@@ -426,11 +440,11 @@ function renderAccount() {
   $('#guest-import-offer').hidden = true;
   if (activeUser) {
     try {
-      const guest = loadState(localStorage, BASE_WORDS);
+      const guest = guestForAccount(loadState(localStorage, BASE_WORDS), state);
       const reviewed = getStats(allWords(BASE_WORDS, guest), guest).reviewed;
       const hasStars = Object.values(guest.progress).some(p => p.starred);
       const hasNew = fingerprint(mergeStates(state, guest, BASE_WORDS)) !== fingerprint(state);
-      if (hasNew && (reviewed > 0 || hasStars || guest.customWords.length)) {
+      if (libraryReady && hasNew && (reviewed > 0 || hasStars || guest.customWords.length)) {
         $('#guest-import-description').textContent = `此瀏覽器另有 ${reviewed} 個單字的訪客練習紀錄、${guest.customWords.length} 個自訂單字。要加入目前帳號嗎？`;
         $('#guest-import-offer').hidden = false;
       }
@@ -446,8 +460,8 @@ async function activateSession(session, event = '') {
     closeWordForm();
     reviewActor = crypto.randomUUID();
     syncPhase = 'guest'; syncDetail = undefined; $('#last-sync').textContent = '';
-    try { state = loadState(localStorage, BASE_WORDS, activeStorageKey()); allowSave = true; }
-    catch { state = emptyState(); allowSave = false; showAuthMessage('此裝置的進度副本無法讀取；雲端同步會嘗試取回已保存的紀錄。', true); }
+    try { state = loadState(localStorage, BASE_WORDS, activeStorageKey()); libraryReady = !next || !!localStorage.getItem(activeStorageKey()); allowSave = true; }
+    catch { state = emptyState(); libraryReady = false; allowSave = false; showAuthMessage('此裝置的進度副本無法讀取；雲端同步會嘗試取回已保存的紀錄。', true); }
     quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false;
     repaintProgress();
     cloudSync?.setUser(next?.id || null);
@@ -465,7 +479,7 @@ async function initializeAccounts() {
     if (!authClient) { renderAccount(); return; }
     cloudSync = createSyncCoordinator({
       remote: createRemote(authClient), words: BASE_WORDS, getState: () => state,
-      applyState: next => { state = next; allowSave = true; save({ upload: false }); repaintProgress(); renderAccount(); },
+      applyState: next => { if (state.includeBaseWords !== next.includeBaseWords) { quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false; } state = next; libraryReady = true; allowSave = true; save({ upload: false }); repaintProgress(); renderAccount(); },
       onStatus: setSyncStatus, isOnline: () => navigator.onLine,
     });
     const subscription = authClient.auth.onAuthStateChange((event, session) => {
@@ -478,7 +492,7 @@ async function initializeAccounts() {
   } catch (error) {
     showAuthMessage(friendlyAuthError(error), true);
     if (!authClient) $('#account-unavailable').hidden = false;
-  } finally { $('#account-loading').hidden = true; renderAccount(); }
+  } finally { authReady = true; $('#account-loading').hidden = true; repaintProgress(); renderAccount(); }
 }
 $$('[data-auth-mode]').forEach(button => button.addEventListener('click', () => setAuthMode(button.dataset.authMode)));
 $('#auth-form').addEventListener('submit', async event => {
@@ -520,7 +534,7 @@ $('#sign-out').addEventListener('click', async () => {
 $('#merge-guest').addEventListener('click', async () => {
   if (!activeUser || !cloudSync) return;
   try {
-    state = mergeStates(state, loadState(localStorage, BASE_WORDS), BASE_WORDS); allowSave = true; save(); repaintProgress(); renderAccount();
+    state = mergeStates(state, guestForAccount(loadState(localStorage, BASE_WORDS), state), BASE_WORDS); allowSave = true; save(); repaintProgress(); renderAccount();
     const success = await cloudSync.sync();
     toast(success ? '訪客紀錄已加入帳號並同步。' : '訪客紀錄已加入此帳號的本機副本，等待雲端同步。');
   } catch { showAuthMessage('訪客紀錄無法讀取。請先匯出備份，原有帳號紀錄仍保留。', true); }

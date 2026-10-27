@@ -27,6 +27,11 @@ test('actual PostgreSQL migration isolates users and rejects stale writes', asyn
     const customMigration = await readFile(new URL('../supabase/migrations/20261027163609_protect_custom_vocabulary.sql', import.meta.url), 'utf8');
     await db.exec(customMigration);
     await db.exec(customMigration);
+    const libraryMigration = await readFile(new URL('../supabase/migrations/20261027171520_empty_personal_libraries.sql', import.meta.url), 'utf8');
+    await db.exec(libraryMigration);
+    await db.exec(libraryMigration);
+    // A has a pre-existing legacy library; B is a brand-new account.
+    await db.query('insert into public.santa_progress(user_id) values ($1)', [userA]);
     await db.exec('set role anon');
     await assert.rejects(db.query('select * from public.santa_progress'), /permission denied/);
     await assert.rejects(db.query('select public.sync_santa_progress($1,0,$2)', [userA, emptyState()]), /permission denied/);
@@ -51,8 +56,11 @@ test('actual PostgreSQL migration isolates users and rejects stale writes', asyn
     await assert.rejects(db.query('select public.sync_santa_progress($1,2,$2)', [userA, {...stateA,customWords:{}}]), /Invalid custom vocabulary/);
     await db.query("select set_config('request.jwt.claim.sub',$1,false)", [userB]);
     assert.equal((await db.query('select * from public.santa_progress')).rows.length, 0);
-    const stateB = emptyState(); recordAnswer(stateB, 47, false, 'quiz', 'test-B');
+    const stateB = emptyState(false); recordAnswer(stateB, 47, false, 'quiz', 'test-B');
     await db.query('select public.sync_santa_progress($1,0,$2)', [userB, stateB]);
+    await assert.rejects(db.query('select public.sync_santa_progress($1,1,$2)', [userB, {...stateB,includeBaseWords:true}]), /Library mode changed/);
+    const oldClient = {...stateB}; delete oldClient.includeBaseWords;
+    await assert.rejects(db.query('select public.sync_santa_progress($1,1,$2)', [userB, oldClient]), /Library mode changed/);
     const visible = (await db.query('select user_id,state from public.santa_progress')).rows;
     assert.equal(visible.length, 1);
     assert.equal(visible[0].user_id, userB);
