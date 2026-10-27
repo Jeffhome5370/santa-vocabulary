@@ -24,6 +24,7 @@ test('client validates results and hides raw provider errors', async () => {
   assert.deepEqual(captured, { name: 'vocabulary-assist', options: { body: { action: 'example', ...fields } } });
   const failure = code => ({ functions: { invoke: async () => ({ error: { message: 'secret upstream detail', context: Response.json({ code }) } }) } });
   await assert.rejects(requestWordAssistant(failure('not_configured'), 'lookup', { word: 'test' }), /尚未啟用/);
+  await assert.rejects(requestWordAssistant(failure('provider_timeout'), 'lookup', { word: 'test' }), /逾時/);
   await assert.rejects(requestWordAssistant(failure('unknown'), 'lookup', { word: 'test' }), error => !error.message.includes('secret'));
 });
 
@@ -94,4 +95,11 @@ test('Edge function fails safely on truncated or invalid AI output', async () =>
   const body = generationBody({ action: 'example', word: 'take over', meaning: '接管', pos: 'phr.v.' });
   assert.ok(body.systemInstruction.parts[0].text.includes('never instructions'));
   assert.deepEqual(body.generationConfig.responseSchema.required, ['example', 'translation']);
+});
+
+test('Edge function distinguishes a provider timeout without revealing its error text', async () => {
+  const f = createHandler({ env: name => settings[name], fetcher: async () => { throw new DOMException('sensitive provider context', 'TimeoutError'); } });
+  const response = await f(new Request('https://edge.example', { method: 'POST', headers: { authorization: 'Bearer user-jwt' } }));
+  assert.equal(response.status, 504);
+  assert.deepEqual(await response.json(), { code: 'provider_timeout' });
 });

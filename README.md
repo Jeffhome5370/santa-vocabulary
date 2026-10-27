@@ -69,7 +69,7 @@ SQL 使用 `auth.uid()` 限定帳號，匿名訪客無讀寫權限；同步使�
 
 每帳號每分鐘最多 6 次、每天最多 60 次（台灣時間午夜重設）。計數器存在私有 schema，使用者無法直接讀寫或重設；通過限制後送往 Gemini 的嘗試會計入用量，即使供應商失敗也不退還該次計數。供應商本身可能另有更低限制及費用；請在 Google AI Studio 確認 key 所屬專案的方案與額度。
 
-AI 查詢只傳送英文；例句生成傳送英文、所選中文意思與詞性。函式不傳送 Email、使用者 ID、整份單字庫、學習紀錄或手動例句給 Gemini，不記錄 prompt 或供應商回覆。Google 免費方案可能將輸入與輸出用於改善產品，請勿在欄位輸入機密資料。AI 建議可能有誤，需自行確認。變更單字、意思、詞性、手動例句或帳號後，舊請求的回覆不會套入新內容；取消／儲存表單也會忽略尚未完成的回覆。
+AI 查詢只傳送英文；例句生成傳送英文、所選中文意思與詞性。函式不傳送 Email、使用者 ID、整份單字庫、學習紀錄或手動例句給 Gemini，不記錄 prompt、回覆文字或 key；失敗時只記錄處理階段、HTTP 狀態或標準化錯誤類別供診斷。後端等待 Gemini 最多 55 秒，前端總等待上限 75 秒；逾時後保留手動內容，可自行重試。Google 免費方案可能將輸入與輸出用於改善產品，請勿在欄位輸入機密資料。AI 建議可能有誤，需自行確認。變更單字、意思、詞性、手動例句或帳號後，舊請求的回覆不會套入新內容；取消／儲存表單也會忽略尚未完成的回覆。
 
 參考：[Gemini 模型](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite)、[API 與方案](https://ai.google.dev/gemini-api/docs/pricing)、[Supabase Secrets](https://supabase.com/docs/guides/functions/secrets)。
 

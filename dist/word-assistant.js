@@ -35,12 +35,21 @@ const ERROR_MESSAGES = {
   rate_limited: '已達 AI 使用限制。每帳號每分鐘最多 6 次、每天最多 60 次，請稍後再試。',
   provider_limited: 'AI 服務目前額度不足或忙碌，請稍後再試；已填內容會保留。',
   provider_error: 'AI 服務暫時無法使用，請稍後再試或自行輸入。',
+  provider_timeout: 'AI 回覆逾時，請稍後重試；你已填寫的內容會保留。',
   invalid_input: '請確認英文單字、中文意思與詞性的長度及內容。',
 };
 
 export async function requestWordAssistant(client, action, fields) {
   if (!client) throw new Error(ERROR_MESSAGES.auth_required);
-  const { data, error } = await client.functions.invoke('vocabulary-assist', { body: { action, ...fields } });
+  let timer;
+  let result;
+  try {
+    result = await Promise.race([
+      client.functions.invoke('vocabulary-assist', { body: { action, ...fields } }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(ERROR_MESSAGES.provider_timeout)), 75000); }),
+    ]);
+  } finally { clearTimeout(timer); }
+  const { data, error } = result;
   if (error) {
     let code;
     try { code = (await error.context?.json())?.code; } catch { /* Never display raw upstream errors. */ }
@@ -106,7 +115,7 @@ export function mountWordAssistant({ getClient, getUser, getWords }) {
   $('#lookup-meanings').addEventListener('click', async () => {
     if (lookupBusy || !canRequest('lookup')) return;
     const request = ++lookupRequest, currentEpoch = epoch, userId = getUser().id;
-    lookupBusy = true; $('#lookup-meanings').disabled = true; status('正在查詢中文意思與詞性…');
+    lookupBusy = true; $('#lookup-meanings').disabled = true; status('正在查詢中文意思與詞性…最多可能需要約一分鐘。');
     try {
       const data = await requestWordAssistant(getClient(), 'lookup', { word: values().word });
       if (request !== lookupRequest || currentEpoch !== epoch || userId !== getUser()?.id) return;
@@ -118,7 +127,7 @@ export function mountWordAssistant({ getClient, getUser, getWords }) {
   $('#generate-example').addEventListener('click', async () => {
     if (exampleBusy || !canRequest('example')) return;
     const request = ++exampleRequest, currentEpoch = epoch, userId = getUser().id;
-    hidePreview(); exampleBusy = true; $('#generate-example').disabled = true; status('正在生成英文例句與繁體中文翻譯…');
+    hidePreview(); exampleBusy = true; $('#generate-example').disabled = true; status('正在生成英文例句與繁體中文翻譯…最多可能需要約一分鐘。');
     try {
       const data = await requestWordAssistant(getClient(), 'example', values());
       if (request !== exampleRequest || currentEpoch !== epoch || userId !== getUser()?.id) return;

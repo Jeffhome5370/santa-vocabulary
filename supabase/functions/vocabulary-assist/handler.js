@@ -69,6 +69,7 @@ async function boundedJson(request) {
 
 export function createHandler({ env, fetcher }) {
   return async request => {
+    let stage = 'auth';
     const origin = request.headers.get('origin');
     if (origin && origin !== ALLOWED_ORIGIN) return fail(403, 'origin_denied');
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: BASE_HEADERS });
@@ -92,6 +93,7 @@ export function createHandler({ env, fetcher }) {
       if (!input) return fail(400, 'invalid_input');
       const apiKey = env('GEMINI_API_KEY');
       if (!apiKey) return fail(503, 'not_configured');
+      stage = 'quota';
       const allowanceResponse = await fetcher(`${url}/rest/v1/rpc/consume_santa_ai_allowance`, {
         method: 'POST', headers: { apikey: publicKey, Authorization: authorization, 'Content-Type': 'application/json' },
         body: '{}', signal: AbortSignal.timeout(8000),
@@ -100,20 +102,25 @@ export function createHandler({ env, fetcher }) {
       if ((await allowanceResponse.json())?.allowed !== true) return fail(429, 'rate_limited');
       const model = env('GEMINI_MODEL') || 'gemini-3.5-flash-lite';
       if (!/^[a-zA-Z0-9._-]{1,100}$/.test(model)) return fail(503, 'not_configured');
+      stage = 'gemini';
       const response = await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: 'POST', headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify(generationBody(input)), signal: AbortSignal.timeout(25000),
+        body: JSON.stringify(generationBody(input)), signal: AbortSignal.timeout(55000),
       });
       // Don't return upstream errors: they can contain provider/account details.
       if (response.status === 429) return fail(429, 'provider_limited');
-      if (!response.ok) return fail(502, 'provider_error');
+      if (!response.ok) { console.warn('vocabulary_assist_provider_status', response.status); return fail(502, 'provider_error'); }
       const generated = await response.json();
       const candidate = generated.candidates?.[0];
-      if (candidate?.finishReason !== 'STOP') return fail(502, 'provider_error');
+      if (candidate?.finishReason !== 'STOP') { console.warn('vocabulary_assist_incomplete', ['MAX_TOKENS', 'SAFETY', 'RECITATION'].includes(candidate?.finishReason) ? candidate.finishReason : 'OTHER'); return fail(502, 'provider_error'); }
       const resultText = (candidate.content?.parts || []).filter(part => !part.thought).map(part => part.text || '').join('');
       const result = validateOutput(input.action, JSON.parse(resultText));
       if (!result) return fail(502, 'provider_error');
       return reply(200, result);
-    } catch { return fail(503, 'provider_error'); }
+    } catch (error) {
+      const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+      console.warn('vocabulary_assist_failure', stage, timedOut ? 'timeout' : 'request_failed');
+      return fail(timedOut ? 504 : 503, timedOut ? 'provider_timeout' : 'provider_error');
+    }
   };
 }
