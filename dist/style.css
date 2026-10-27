@@ -26,6 +26,7 @@
 .add-word-form label { display: flex; flex-direction: column; gap: 8px; font-size: 14px; font-weight: 600; }
 .add-word-form input, .add-word-form textarea { width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--word-form-border); border-radius: 8px; color: inherit; background: #fcfdf9; font: inherit; font-weight: 400; }
 .add-word-form textarea { resize: vertical; }
+.add-word-form input, .add-word-form textarea { font-size: 16px; }
 .add-word-form input:focus, .add-word-form textarea:focus { outline: 2px solid #397669; outline-offset: 2px; }
 .add-word-form .auth-message, .add-word-actions { grid-column: 1 / -1; margin: 0; }
 .add-word-actions { display: flex; flex-wrap: wrap; gap: 12px; }
