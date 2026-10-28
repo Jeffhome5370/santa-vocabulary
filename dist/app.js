@@ -1,4 +1,4 @@
-import { dailyKnownCount } from './design.js';
+import { dailyKnownCount, loadGuestState } from './design.js';
 import { createSpeechPlayer, mountSpeechSettings } from './speech.js';
 import { WORDS as BASE_WORDS } from './data.js';
 import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
@@ -9,7 +9,7 @@ import { mountWordAssistant } from './word-assistant.js';
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-let state = emptyState(), allowSave = true, storageWarning = false;
+let state = emptyState(false), allowSave = true, storageWarning = false;
 let WORDS = BASE_WORDS;
 let filter = 'all', order = WORDS.map(word => word.id), cards = [], position = 0, flipped = false, currentView = 'cards';
 let quiz = null, toastTimer;
@@ -20,6 +20,7 @@ let authReady = false, libraryReady = false;
 let editingWordId = null, editingWordSnapshot = null, pendingDeleteId = null, pendingDeleteSnapshot = null;
 const accountStorageKey = id => `${STORAGE_KEY}.user.${id}`;
 const activeStorageKey = () => activeUser ? accountStorageKey(activeUser.id) : STORAGE_KEY;
+const loadCurrentState = () => activeUser ? loadState(localStorage, BASE_WORDS, activeStorageKey()) : loadGuestState(localStorage, BASE_WORDS);
 const wordAssistant = mountWordAssistant({
   getClient: () => authClient, getUser: () => activeUser,
   getWords: () => allWords(BASE_WORDS, state),
@@ -40,7 +41,7 @@ function save({ upload = true } = {}) {
   }
   if (upload) cloudSync?.schedule();
 }
-try { state = loadState(localStorage, BASE_WORDS); }
+try { state = loadGuestState(localStorage, BASE_WORDS); }
 catch {
   allowSave = false;
   setTimeout(() => toast('原有進度無法讀取，目前以暫存模式練習。請匯出備份或匯入有效檔案；重設後可恢復儲存。', 12000), 0);
@@ -51,7 +52,7 @@ function renderStats() {
   const ids = new Set(WORDS.map(word => word.id));
   order = [...order.filter(id => ids.has(id)), ...WORDS.filter(word => !order.includes(word.id)).map(word => word.id)];
   const stats = getStats(WORDS, state);
-  $('#stats').innerHTML = `<div class="stat"><img src="./assets/dinotaeng/pocket.webp" class="ui-emoji" alt="" aria-hidden="true"><div><span class="stat-label">口袋裡的單字</span><strong>${stats.total}</strong><small>個</small></div></div><div class="stat"><img src="./assets/dinotaeng/sparkle.webp" class="ui-emoji" alt="" aria-hidden="true"><div><span class="stat-label">已經變熟悉</span><strong>${stats.known}</strong><small>個</small></div></div>`;
+  $('#stats').innerHTML = `<button type="button" class="stat stat-link" data-open-pocket aria-label="口袋裡的單字 ${stats.total} 個，開啟單字口袋"><img src="./assets/dinotaeng/pocket.webp" class="ui-emoji" alt="" aria-hidden="true"><span><span class="stat-label">口袋裡的單字</span><strong>${stats.total}</strong><small>個</small></span></button><div class="stat"><img src="./assets/dinotaeng/sparkle.webp" class="ui-emoji" alt="" aria-hidden="true"><div><span class="stat-label">已經變熟悉</span><strong>${stats.known}</strong><small>個</small></div></div>`;
   const goal = dailyKnownCount(WORDS, state);
   $('#goal-count').textContent = `${Math.min(goal, 10)} / 10`;
   $('#goal-description').textContent = goal >= 10 ? '十顆棉花糖烤好了！記得休息一下。' : '烤熟 10 個不同的單字，慢慢累積。';
@@ -265,6 +266,12 @@ function exportMarkdown() {
 }
 
 $$('[data-view]').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
+$('#stats').addEventListener('click', event => {
+  if (event.target.closest('[data-open-pocket]')) {
+    setView('library');
+    $('#search').focus({ preventScroll: true });
+  }
+});
 $$('[data-filter]').forEach(button => button.addEventListener('click', () => {
   filter = button.dataset.filter; position = 0;
   $$('[data-filter]').forEach(item => item.classList.toggle('selected', item.dataset.filter === filter));
@@ -453,7 +460,7 @@ $('#cancel-reset').addEventListener('click', () => {
 });
 $('#confirm-reset').addEventListener('click', () => {
   if (activeUser) { toast('請先登出，再重設此裝置的訪客紀錄。雲端紀錄不會被刪除。'); return; }
-  state = emptyState(); allowSave = true; save(); renderStats(); renderHistory(); refreshCards();
+  state = emptyState(false); allowSave = true; save(); renderStats(); renderHistory(); refreshCards();
   quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false;
   $('#reset-confirmation').hidden = true; $('#reset-progress').hidden = false;
   $('#reset-progress').focus();
@@ -461,7 +468,7 @@ $('#confirm-reset').addEventListener('click', () => {
 });
 window.addEventListener('storage', event => {
   if (event.key !== activeStorageKey()) return;
-  try { const other = loadState(localStorage, BASE_WORDS, activeStorageKey()); state = mergeStates(state, other, BASE_WORDS); repaintProgress(); cloudSync?.schedule(); }
+  try { const other = loadCurrentState(); state = mergeStates(state, other, BASE_WORDS); repaintProgress(); cloudSync?.schedule(); }
   catch { toast('其他分頁的進度無法讀取，目前的練習仍保留。'); }
 });
 function repaintProgress() {
@@ -528,7 +535,7 @@ function renderAccount() {
   $('#guest-import-offer').hidden = true;
   if (activeUser) {
     try {
-      const guest = guestForAccount(loadState(localStorage, BASE_WORDS), state);
+      const guest = guestForAccount(loadGuestState(localStorage, BASE_WORDS), state);
       const reviewed = getStats(allWords(BASE_WORDS, guest), guest).reviewed;
       const hasStars = Object.values(guest.progress).some(p => p.starred);
       const hasNew = fingerprint(mergeStates(state, guest, BASE_WORDS)) !== fingerprint(state);
@@ -549,8 +556,8 @@ async function activateSession(session, event = '') {
     closeDeleteWord();
     reviewActor = crypto.randomUUID();
     syncPhase = 'guest'; syncDetail = undefined; $('#last-sync').textContent = '';
-    try { state = loadState(localStorage, BASE_WORDS, activeStorageKey()); libraryReady = !next || !!localStorage.getItem(activeStorageKey()); allowSave = true; }
-    catch { state = emptyState(); libraryReady = false; allowSave = false; showAuthMessage('此裝置的進度副本無法讀取；雲端同步會嘗試取回已保存的紀錄。', true); }
+    try { state = loadCurrentState(); libraryReady = !next || !!localStorage.getItem(activeStorageKey()); allowSave = true; }
+    catch { state = emptyState(false); libraryReady = false; allowSave = false; showAuthMessage('此裝置的進度副本無法讀取；雲端同步會嘗試取回已保存的紀錄。', true); }
     quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false;
     repaintProgress();
     cloudSync?.setUser(next?.id || null);
@@ -623,7 +630,7 @@ $('#sign-out').addEventListener('click', async () => {
 $('#merge-guest').addEventListener('click', async () => {
   if (!activeUser || !cloudSync) return;
   try {
-    state = mergeStates(state, guestForAccount(loadState(localStorage, BASE_WORDS), state), BASE_WORDS); allowSave = true; save(); repaintProgress(); renderAccount();
+    state = mergeStates(state, guestForAccount(loadGuestState(localStorage, BASE_WORDS), state), BASE_WORDS); allowSave = true; save(); repaintProgress(); renderAccount();
     const success = await cloudSync.sync();
     toast(success ? '訪客紀錄已加入帳號並同步。' : '訪客紀錄已加入此帳號的本機副本，等待雲端同步。');
   } catch { showAuthMessage('訪客紀錄無法讀取。請先匯出備份，原有帳號紀錄仍保留。', true); }

@@ -1,8 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyState, recordAnswer, deleteWord } from '../dist/engine.js';
+import { emptyState, recordAnswer, deleteWord, allWords, addCustomWord, STORAGE_KEY, loadState } from '../dist/engine.js';
 import { WORDS } from '../dist/data.js';
-import { dailyKnownCount, taipeiDay } from '../dist/design.js';
+import { dailyKnownCount, taipeiDay, loadGuestState } from '../dist/design.js';
+
+test('fresh guests start empty and never read a signed-in account cache', () => {
+  const account = emptyState();
+  addCustomWord(account, WORDS, { word: 'private', meaning: '私人' });
+  const values = new Map([[`${STORAGE_KEY}.user.my-account`, JSON.stringify(account)]]);
+  const storage = { getItem: key => values.get(key) ?? null };
+  assert.equal(allWords(WORDS, loadGuestState(storage, WORDS)).length, 0);
+  assert.equal(allWords(WORDS, loadState(storage, WORDS, `${STORAGE_KEY}.user.my-account`)).length, WORDS.length + 1);
+});
+
+test('old guest starter decks are hidden while their additions and reviews remain recoverable', () => {
+  const previous = emptyState();
+  const custom = addCustomWord(previous, WORDS, { word: 'curious', meaning: '好奇的' });
+  recordAnswer(previous, WORDS[0].id, true, 'card', 'guest');
+  const saved = JSON.stringify(previous);
+  const storage = { getItem: key => key === STORAGE_KEY ? saved : null };
+  const guest = loadGuestState(storage, WORDS);
+  assert.deepEqual(allWords(WORDS, guest).map(word => word.id), [custom.id]);
+  assert.deepEqual(guest.progress, previous.progress);
+  assert.deepEqual(guest.history, previous.history);
+  assert.equal(storage.getItem(STORAGE_KEY), saved);
+});
 
 test('daily goal deduplicates correct card and quiz answers and ignores wrong/deleted words', () => {
   const state = emptyState();

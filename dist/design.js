@@ -1,4 +1,10 @@
-import { visibleHistory } from './engine.js';
+import { visibleHistory, loadState } from './engine.js';
+
+// Guest visitors start without the shared starter deck. Keep their own additions
+// and saved reviews intact; account caches and cloud libraries are loaded separately.
+export function loadGuestState(storage, words) {
+  return { ...loadState(storage, words), includeBaseWords: false };
+}
 
 export const taipeiDay = at => /^\d{4}-\d{2}-\d{2}$/.test(at)
   ? at : new Date(at).toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
