@@ -1,7 +1,7 @@
 import { dailyKnownCount, loadGuestState, showEntry, sessionView } from './design.js';
 import { createSpeechPlayer, mountSpeechSettings } from './speech.js';
 import { WORDS as BASE_WORDS } from './data.js';
-import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState, resetAllCards } from './engine.js';
+import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizPool, validateState, mergeStates, loadState, resetAllCards } from './engine.js';
 import { createAccountClient, friendlyAuthError } from './account.js';
 import { createRemote, createSyncCoordinator, fingerprint } from './cloud-sync.js';
 import { mountWordAssistant } from './word-assistant.js';
@@ -64,11 +64,10 @@ function renderStats() {
   $('#all-count').textContent = WORDS.length;
   $('#weak-count').textContent = stats.weak;
   $('#deck-count').textContent = `${WORDS.length} 個單字`;
-  $('#start-quiz').disabled = !ready || WORDS.length < 4;
   $('#open-add-word').disabled = !ready;
   $('#reset-all-cards').disabled = !ready;
   $('#confirm-reset-cards').disabled = !ready || !WORDS.length;
-  $('#quiz-availability').textContent = !ready ? '正在載入你的單字庫…' : WORDS.length < 4 ? `目前 ${WORDS.length} 個單字；加入至少 4 個英文與意思各不相同的單字後，即可開始四選一。` : '優先安排待加強與尚未複習的單字。';
+  renderQuizAvailability();
 }
 function statusBadge(word) {
   const p = getProgress(state, word.id);
@@ -173,11 +172,29 @@ function setView(view) {
   if (view === 'library') renderLibrary();
   if (view === 'progress') renderHistory();
 }
+function renderQuizAvailability() {
+  const ready = authReady && (!activeUser || libraryReady);
+  const scope = $('#quiz-scope').value;
+  const weakCount = WORDS.filter(word => matchesFilter(word, state, 'weak')).length;
+  $('#quiz-scope-weak').textContent = `只考再烤一下（${weakCount} 個）`;
+  const pool = ready ? quizPool(WORDS, state, scope, $('#quiz-direction').value) : [];
+  $('#start-quiz').disabled = !pool.length;
+  let message;
+  if (!ready) message = '正在載入你的單字庫…';
+  else if (scope === 'weak' && !weakCount) message = '目前沒有「再烤一下」的單字。可先在翻字卡標記「還不熟，再烤一下」，或改選「全部單字」。';
+  else if (!pool.length) message = '目前無法組成四個不同選項。請加入更多英文與中文意思不同的單字，或調整出題方式。';
+  else if (scope === 'weak') message = '';
+  else message = `從全部單字隨機抽出最多 ${Math.min(pool.length, 10)} 題，同一回不重複。`;
+  $('#quiz-availability').textContent = message;
+  $('#quiz-availability').hidden = !message;
+  return pool;
+}
 function startQuiz() {
   const direction = $('#quiz-direction').value;
-  const eligible = quizCandidates(WORDS, direction);
-  if (!eligible.length) { toast('請先加入至少 4 個英文與意思各不相同的單字，再開始四選一。'); return; }
-  quiz = { words: selectQuizWords(eligible, state), direction, index: 0, answers: [], question: null, answered: false };
+  const scope = $('#quiz-scope').value;
+  const eligible = renderQuizAvailability();
+  if (!eligible.length) { toast($('#quiz-availability').textContent); return; }
+  quiz = { words: selectQuizWords(eligible, state, 10, scope), scope, direction, index: 0, answers: [], question: null, answered: false };
   $('#quiz-setup').hidden = true;
   $('#quiz-result').hidden = true;
   $('#quiz-active').hidden = false;
@@ -223,7 +240,7 @@ function finishQuiz() {
   const correct = answers.filter(answer => answer.correct).length;
   $('#quiz-active').hidden = true;
   $('#quiz-result').hidden = false;
-  $('#quiz-result').innerHTML = `<p class="eyebrow">PRACTICE MAKES PROGRESS</p><h2>這一回，你又前進了一點。</h2><div class="result-number">${correct}<small> / ${answers.length}</small></div><p class="muted">正確率 ${Math.round(correct / answers.length * 100)}%${answers.length < quiz.words.length ? ' · 本回提早結束，僅計已作答題目' : ''}</p><div class="result-review">${answers.map(answer => `<div class="result-row${answer.correct ? '' : ' wrong'}"><span>${answer.correct ? '✓' : '↻'} <strong>${escape(answer.word.word)}</strong></span><span>${escape(answer.word.meaning)}</span></div>`).join('')}</div><div class="result-actions"><button class="button primary" data-action="again">再練 10 題 →</button><button class="button outline" data-action="weak">翻卡複習待加強</button></div><p class="fine-print">結果已記錄在此瀏覽器；可到學習紀錄匯出備份。</p>`;
+  $('#quiz-result').innerHTML = `<p class="eyebrow">PRACTICE MAKES PROGRESS</p><h2>這一回，你又前進了一點。</h2><div class="result-number">${correct}<small> / ${answers.length}</small></div><p class="muted">正確率 ${Math.round(correct / answers.length * 100)}%${answers.length < quiz.words.length ? ' · 本回提早結束，僅計已作答題目' : ''}</p><div class="result-review">${answers.map(answer => `<div class="result-row${answer.correct ? '' : ' wrong'}"><span>${answer.correct ? '✓' : '↻'} <strong>${escape(answer.word.word)}</strong></span><span>${escape(answer.word.meaning)}</span></div>`).join('')}</div><div class="result-actions"><button class="button primary" data-action="again">再測一回 →</button><button class="button outline" data-action="settings">調整測驗設定</button><button class="button outline" data-action="weak">翻卡複習待加強</button></div><p class="fine-print">結果已記錄在此瀏覽器；可到學習紀錄匯出備份。</p>`;
   quiz = null;
 }
 function renderLibrary() {
@@ -341,6 +358,8 @@ document.addEventListener('keydown', event => {
   else if (event.key === 'ArrowRight') { event.preventDefault(); moveCard(1); }
 });
 $('#start-quiz').addEventListener('click', startQuiz);
+$('#quiz-scope').addEventListener('change', renderQuizAvailability);
+$('#quiz-direction').addEventListener('change', renderQuizAvailability);
 $('#empty-cards').addEventListener('click', event => { if (event.target.closest('#empty-add-word')) { setView('library'); $('#open-add-word').click(); } });
 $('#quiz-options').addEventListener('click', event => {
   const button = event.target.closest('[data-choice]');
@@ -354,6 +373,7 @@ $('#end-quiz').addEventListener('click', finishQuiz);
 $('#quiz-result').addEventListener('click', event => {
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action === 'again') startQuiz();
+  if (action === 'settings') { $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false; renderQuizAvailability(); $('#quiz-scope').focus(); }
   if (action === 'weak') {
     filter = 'weak'; position = 0;
     $$('[data-filter]').forEach(button => button.classList.toggle('selected', button.dataset.filter === filter));

@@ -11,16 +11,16 @@ test('all 86 unique cards include bilingual examples and corrected vocabulary', 
   assert.equal(WORDS.find(word => word.id === 61).meaning, '禮貌、禮遇');
   assert.match(WORDS.find(word => word.id === 85).meaning, /殿下/);
 });
-test('latest error has priority, then unseen words; stars alone are not reviews', () => {
+test('all-word quiz samples unique words regardless of review status; stars alone are not reviews', () => {
   const state = emptyState();
   recordAnswer(state, 1, true, 'quiz');
   recordAnswer(state, 23, false, 'quiz');
   toggleStar(state, 5);
   const selected = selectQuizWords(WORDS, state);
   assert.equal(selected.length, 10);
-  assert.equal(selected[0].id, 23);
   assert.equal(new Set(selected.map(word => word.id)).size, 10);
-  assert.ok(!selected.some(word => word.id === 1));
+  const full = selectQuizWords(WORDS, state, WORDS.length, 'all');
+  assert.deepEqual(new Set(full.map(word=>word.id)),new Set(WORDS.map(word=>word.id)));
   assert.equal(getStats(WORDS, state).reviewed, 2);
 });
 test('every direction has four distinct options and exactly one answer', () => {
