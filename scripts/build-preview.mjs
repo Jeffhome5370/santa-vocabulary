@@ -12,10 +12,16 @@ await cp(trialDist, preview, { recursive: true });
 // Email verification/recovery returns to the already allowlisted production URL.
 // Password login, synchronization and AI remain available directly in the preview.
 const app = path.join(preview, 'app.js');
-await writeFile(app, (await readFile(app, 'utf8')).replace(
+let appSource = (await readFile(app, 'utf8')).replace(
   "const redirectTo = new URL('./', location.href).href;",
   "const redirectTo = new URL('../../', location.href).href;"
-));
+);
+// The new entry point must not import an older cached design module.
+for (const filename of ['design.js', 'icons.js', 'speech.js']) {
+  const hash = createHash('sha256').update(await readFile(path.join(preview, filename))).digest('hex').slice(0, 12);
+  appSource = appSource.replace(`'./${filename}'`, `'./${filename}?v=${hash}'`);
+}
+await writeFile(app, appSource);
 // Pages uses browser/CDN caching. Tie the theme and entry module URL to content.
 const entry = path.join(preview, 'index.html');
 let html = await readFile(entry, 'utf8');
