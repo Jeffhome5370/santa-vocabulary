@@ -1,3 +1,4 @@
+import { dailyKnownCount } from './design.js';
 import { WORDS as BASE_WORDS } from './data.js';
 import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
 import { createAccountClient, friendlyAuthError } from './account.js';
@@ -49,7 +50,13 @@ function renderStats() {
   const ids = new Set(WORDS.map(word => word.id));
   order = [...order.filter(id => ids.has(id)), ...WORDS.filter(word => !order.includes(word.id)).map(word => word.id)];
   const stats = getStats(WORDS, state);
-  $('#stats').innerHTML = `<div class="stat"><span class="stat-label">單字總數</span><strong>${stats.total}</strong><small>個單字</small></div><div class="stat"><span class="stat-label">已熟悉</span><strong>${stats.known}</strong><small>/ ${stats.total}</small><span class="stat-bar"><i style="width:${stats.total ? stats.known / stats.total * 100 : 0}%"></i></span></div><div class="stat weak"><span class="stat-label">待加強</span><strong>${stats.weak}</strong><small>個單字</small></div><div class="stat"><span class="stat-label">測驗正確率</span><strong>${stats.accuracy === null ? '—' : `${stats.accuracy}%`}</strong></div>`;
+  $('#stats').innerHTML = `<div class="stat"><img src="./assets/dinotaeng/pocket.webp" class="ui-emoji" alt="" aria-hidden="true"><div><span class="stat-label">口袋裡的單字</span><strong>${stats.total}</strong><small>個</small></div></div><div class="stat"><img src="./assets/dinotaeng/sparkle.webp" class="ui-emoji" alt="" aria-hidden="true"><div><span class="stat-label">已經變熟悉</span><strong>${stats.known}</strong><small>個</small></div></div>`;
+  const goal = dailyKnownCount(WORDS, state);
+  $('#goal-count').textContent = `${Math.min(goal, 10)} / 10`;
+  $('#goal-description').textContent = goal >= 10 ? '十顆棉花糖烤好了！記得休息一下。' : '烤熟 10 個不同的單字，慢慢累積。';
+  $('#marshmallows').innerHTML = Array.from({ length: 10 }, (_, i) => `<img class="marshmallow ${i < goal ? 'filled' : ''}" src="./assets/dinotaeng/marshmallow.webp" alt="" aria-hidden="true">`).join('');
+  $('#marshmallows').setAttribute('aria-label', `今天記住 ${goal} 個不同的單字`);
+  $('#extended-stats').textContent = `已複習 ${stats.reviewed}／${stats.total} 個 · 待加強 ${stats.weak} 個 · 測驗正確率 ${stats.accuracy === null ? '尚無測驗紀錄' : stats.accuracy + '%'}`;
   $('#all-count').textContent = WORDS.length;
   $('#weak-count').textContent = stats.weak;
   $('#deck-count').textContent = `${WORDS.length} 個單字`;
@@ -95,10 +102,16 @@ function renderCard() {
   $('#front-word').textContent = enFront ? word.word : word.meaning;
   $('#front-word').lang = enFront ? 'en' : 'zh-Hant';
   $('#front-pos').textContent = word.pos;
+  for (const [id, english] of [['front-word', enFront], ['back-word', !enFront]]) {
+    const element = $('#' + id);
+    if (english) { element.dataset.say = 'word'; element.setAttribute('role', 'button'); element.setAttribute('tabindex', '0'); element.setAttribute('aria-label', '朗讀英文單字 ' + word.word); }
+    else { delete element.dataset.say; element.removeAttribute('role'); element.removeAttribute('tabindex'); element.removeAttribute('aria-label'); }
+  }
+
   $('#back-word').textContent = enFront ? word.meaning : word.word;
   $('#back-word').lang = enFront ? 'zh-Hant' : 'en';
   $('#back-secondary').textContent = enFront ? `${word.word} · ${word.pos}` : `${word.meaning} · ${word.pos}`;
-  $('#back-example').innerHTML = `<span lang="en">${escape(word.example)}</span><em>${escape(word.translation)}</em>`;
+  $('#back-example').innerHTML = `<span lang="en" data-say="example" role="button" tabindex="0" aria-label="朗讀英文例句">${escape(word.example)}</span><em>${escape(word.translation)}</em>`;
   $('#back-note').textContent = word.note;
   $('#back-note').hidden = !word.note;
   $('#card-status').textContent = badge.text;
@@ -222,8 +235,8 @@ function renderLibrary() {
     const p = getProgress(state, word.id), badge = statusBadge(word);
     const actions = selected === 'deleted'
       ? `<span class="badge">已刪除</span><button class="manage-word" data-restore="${word.id}" aria-label="復原 ${escape(word.word)}">復原</button>`
-      : `<span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button><button class="study-word" data-study="${word.id}" aria-label="翻卡複習 ${escape(word.word)}">翻卡 ↗</button><button class="manage-word" data-edit="${word.id}" aria-label="編輯 ${escape(word.word)}">編輯</button><button class="manage-word delete" data-delete="${word.id}" aria-label="刪除 ${escape(word.word)}">刪除</button>`;
-    return `<article class="word-row"><span class="word-number">${word.id >= 1_000_000 ? '自訂' : String(word.id).padStart(2, '0')}</span><div><h3 lang="en">${escape(word.word)}<small>${escape(word.pos)}</small></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}${!word.example && !word.translation && !word.note ? '<p>尚未填寫例句或用法。</p>' : ''}</details></div><div class="row-actions">${actions}</div></article>`;
+      : `<span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button><button class="study-word" data-study="${word.id}" aria-label="翻卡複習 ${escape(word.word)}">翻卡 ↗</button><button class="manage-word delete" data-delete="${word.id}" aria-label="刪除 ${escape(word.word)}">刪除</button>`;
+    return `<article class="word-row"><span class="word-number">${word.id >= 1_000_000 ? '自訂' : String(word.id).padStart(2, '0')}</span><div><h3><button type="button" class="word-edit-title" data-edit="${word.id}" ${selected === 'deleted' ? 'disabled' : ''} aria-label="編輯 ${escape(word.word)}"><img src="./assets/dinotaeng/bobo.webp" class="row-emoji" alt="" aria-hidden="true"><span lang="en">${escape(word.word)}</span><small>${escape(word.pos)}</small></button></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}${!word.example && !word.translation && !word.note ? '<p>尚未填寫例句或用法。</p>' : ''}</details></div><div class="row-actions">${actions}</div></article>`;
   }).join('') : selected === 'deleted' && !deleted.length ? '<div class="empty"><strong>目前沒有已刪除的單字</strong>刪除的單字會保留在這裡，方便隨時復原。</div>' : WORDS.length || deleted.length ? '<div class="empty"><strong>沒有符合條件的單字</strong>試試其他關鍵字，或清除學習狀態篩選。</div>' : '<div class="empty"><strong>你的單字庫還是空的</strong>按上方「＋ 新增單字」，加入自己的第一個單字。</div>';
 }
 const dateLabel = at => /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : new Date(at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -257,7 +270,20 @@ $$('[data-filter]').forEach(button => button.addEventListener('click', () => {
   $$('[data-filter]').forEach(item => item.classList.toggle('selected', item.dataset.filter === filter));
   refreshCards();
 }));
-$('#flashcard').addEventListener('click', flipCard);
+function speakText(text) {
+  if (!text) return;
+  if (!('speechSynthesis' in window)) { toast('此瀏覽器不支援朗讀功能。'); return; }
+  speechSynthesis.cancel();
+  const speech = new SpeechSynthesisUtterance(text); speech.lang = 'en-US'; speech.rate = .85;
+  speech.onerror = () => toast('目前無法播放發音，請稍後再試。');
+  speechSynthesis.speak(speech);
+}
+$('#flashcard').addEventListener('click', event => {
+  const speech = event.target.closest('[data-say]');
+  if (speech && cards.length) { event.stopPropagation(); speakText(speech.dataset.say === 'example' ? cards[position].example : cards[position].word); return; }
+  flipCard();
+});
+$('#card-stage').addEventListener('click', event => { if (!event.target.closest('#flashcard, #star-card, #speak')) flipCard(); });
 $('#previous').addEventListener('click', () => moveCard(-1));
 $('#next').addEventListener('click', () => moveCard(1));
 $('#mark-known').addEventListener('click', () => markCard(true));
@@ -286,8 +312,10 @@ $('#speak').addEventListener('click', () => {
 document.addEventListener('keydown', event => {
   if (currentView !== 'cards' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
   const target = event.target;
+  const speech = target.closest('[data-say]');
+  if (speech && cards.length && (event.code === 'Space' || event.key === 'Enter')) { event.preventDefault(); speakText(speech.dataset.say === 'example' ? cards[position].example : cards[position].word); return; }
   if (target.closest('input,select,textarea,summary,a') || (target.closest('button') && target.id !== 'flashcard')) return;
-  if (event.code === 'Space') { event.preventDefault(); flipCard(); }
+  if (event.code === 'Space' || (event.key === 'Enter' && target.id === 'flashcard')) { event.preventDefault(); flipCard(); }
   else if (event.key === 'ArrowLeft') { event.preventDefault(); moveCard(-1); }
   else if (event.key === 'ArrowRight') { event.preventDefault(); moveCard(1); }
 });

@@ -1,0 +1,53 @@
+name: DINOTAENG design preview
+
+on:
+  push:
+    branches: [codex/dinotaeng-design]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/codex/dinotaeng-design'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}preview/dinotaeng/
+    steps:
+      - name: Check out unchanged production main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: production
+      - name: Check out design branch
+        uses: actions/checkout@v4
+        with:
+          path: trial
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: trial/package-lock.json
+      - name: Install test dependency
+        run: npm ci
+        working-directory: trial
+      - name: Validate all existing features and design logic
+        run: npm test && npm run check
+        working-directory: trial
+      - name: Combine production and preview routes
+        run: node trial/scripts/build-preview.mjs production/dist trial/dist site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Publish preview without merging
+        id: deploy
+        uses: actions/deploy-pages@v5
