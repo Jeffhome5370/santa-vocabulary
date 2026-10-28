@@ -147,11 +147,12 @@ export function getStats(words, state) {
   const quiz = visibleHistory(words, state).filter(entry => entry.source === 'quiz');
   return { total: words.length, reviewed: progress.filter(p => p.reviews > 0).length, known: progress.filter(p => p.lastCorrect === true).length, weak: progress.filter(p => p.lastCorrect === false).length, accuracy: quiz.length ? Math.round(quiz.filter(entry => entry.correct).length / quiz.length * 100) : null };
 }
-export function selectQuizWords(words, state, count = 10) {
-  const weak = shuffle(words.filter(w => matchesFilter(w, state, 'weak')));
-  const fresh = shuffle(words.filter(w => matchesFilter(w, state, 'new')));
-  const known = shuffle(words.filter(w => getProgress(state, w.id).lastCorrect === true));
-  return [...weak, ...fresh, ...known].slice(0, count);
+function scopeQuizWords(words, state, scope) {
+  if (!['all', 'weak'].includes(scope)) throw new Error('請選擇有效的測驗範圍。');
+  return scope === 'weak' ? words.filter(word => matchesFilter(word, state, 'weak')) : words;
+}
+export function selectQuizWords(words, state, count = 10, scope = 'all') {
+  return shuffle(scopeQuizWords(words, state, scope)).slice(0, count);
 }
 const comparable = meaning => meaning.replace(/[\s，,、；;。.（）()]/g, '').toLowerCase();
 export function createQuestion(word, words, direction = 'en') {
@@ -177,6 +178,10 @@ export function quizCandidates(words, direction = 'en') {
     try { for (const selected of direction === 'mixed' ? ['en', 'zh'] : [direction]) createQuestion(word, words, selected); return true; }
     catch { return false; }
   });
+}
+export function quizPool(words, state, scope = 'all', direction = 'en') {
+  // Limit tested words, while the complete visible library supplies distractors.
+  return scopeQuizWords(quizCandidates(words, direction), state, scope);
 }
 export function validateState(input, words) {
   const fail = () => { throw new Error('進度檔格式不正確，請選擇由 Santa 單字室匯出的 JSON。'); };

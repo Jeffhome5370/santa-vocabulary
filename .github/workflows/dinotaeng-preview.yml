@@ -43,7 +43,9 @@ jobs:
         run: npm test && npm run check
         working-directory: trial
       - name: Combine production and preview routes
-        run: node trial/scripts/build-preview.mjs production/dist trial/dist site
+        run: |
+          node trial/scripts/build-site.mjs production/dist production-site
+          node trial/scripts/build-preview.mjs production-site trial/dist site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
