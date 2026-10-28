@@ -183,9 +183,10 @@ function renderQuizAvailability() {
   if (!ready) message = '正在載入你的單字庫…';
   else if (scope === 'weak' && !weakCount) message = '目前沒有「再烤一下」的單字。可先在翻字卡標記「還不熟，再烤一下」，或改選「全部單字」。';
   else if (!pool.length) message = '目前無法組成四個不同選項。請加入更多英文與中文意思不同的單字，或調整出題方式。';
-  else if (scope === 'weak') message = `只從「再烤一下」隨機出題，本回最多 ${Math.min(pool.length, 10)} 題；不足 10 個就考現有數量。選項會從整個字庫提供。`;
+  else if (scope === 'weak') message = '';
   else message = `從全部單字隨機抽出最多 ${Math.min(pool.length, 10)} 題，同一回不重複。`;
   $('#quiz-availability').textContent = message;
+  $('#quiz-availability').hidden = !message;
   return pool;
 }
 function startQuiz() {
