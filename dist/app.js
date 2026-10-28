@@ -1,5 +1,4 @@
 import { dailyKnownCount, loadGuestState, showEntry, sessionView } from './design.js';
-import { uiIcon } from './icons.js';
 import { createSpeechPlayer, mountSpeechSettings } from './speech.js';
 import { WORDS as BASE_WORDS } from './data.js';
 import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
@@ -55,11 +54,11 @@ function renderStats() {
   const ids = new Set(WORDS.map(word => word.id));
   order = [...order.filter(id => ids.has(id)), ...WORDS.filter(word => !order.includes(word.id)).map(word => word.id)];
   const stats = getStats(WORDS, state);
-  $('#stats').innerHTML = `<button type="button" class="stat stat-link" data-open-pocket aria-label="口袋裡的單字 ${stats.total} 個，開啟單字口袋">${uiIcon('pocket', 'ui-emoji')}<span><span class="stat-label">口袋裡的單字</span><strong>${stats.total}</strong><small>個</small></span></button><div class="stat">${uiIcon('sparkle', 'ui-emoji')}<div><span class="stat-label">已經變熟悉</span><strong>${stats.known}</strong><small>個</small></div></div>`;
+  $('#stats').innerHTML = `<button type="button" class="stat stat-link" data-open-pocket aria-label="口袋裡的單字 ${stats.total} 個，開啟單字口袋"><img src="./assets/dinotaeng/pocket.webp" class="ui-emoji" alt="" aria-hidden="true"><span><span class="stat-label">口袋裡的單字</span><strong>${stats.total}</strong><small>個</small></span></button><div class="stat"><img src="./assets/dinotaeng/sparkle.webp" class="ui-emoji" alt="" aria-hidden="true"><div><span class="stat-label">已經變熟悉</span><strong>${stats.known}</strong><small>個</small></div></div>`;
   const goal = dailyKnownCount(WORDS, state);
   $('#goal-count').textContent = `${Math.min(goal, 10)} / 10`;
   $('#goal-description').textContent = goal >= 10 ? '十顆棉花糖烤好了！記得休息一下。' : '烤熟 10 個不同的單字，慢慢累積。';
-  $('#marshmallows').innerHTML = Array.from({ length: 10 }, (_, i) => uiIcon('leaf', `marshmallow ${i < goal ? 'filled' : ''}`)).join('');
+  $('#marshmallows').innerHTML = Array.from({ length: 10 }, (_, i) => `<img class="marshmallow ${i < goal ? 'filled' : ''}" src="./assets/dinotaeng/marshmallow.webp" alt="" aria-hidden="true">`).join('');
   $('#marshmallows').setAttribute('aria-label', `今天記住 ${goal} 個不同的單字`);
   $('#extended-stats').textContent = `已複習 ${stats.reviewed}／${stats.total} 個 · 待加強 ${stats.weak} 個 · 測驗正確率 ${stats.accuracy === null ? '尚無測驗紀錄' : stats.accuracy + '%'}`;
   $('#all-count').textContent = WORDS.length;
@@ -241,7 +240,7 @@ function renderLibrary() {
     const actions = selected === 'deleted'
       ? `<span class="badge">已刪除</span><button class="manage-word" data-restore="${word.id}" aria-label="復原 ${escape(word.word)}">復原</button>`
       : `<span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button><button class="study-word" data-study="${word.id}" aria-label="翻卡複習 ${escape(word.word)}">翻卡 ↗</button><button class="manage-word delete" data-delete="${word.id}" aria-label="刪除 ${escape(word.word)}">刪除</button>`;
-    return `<article class="word-row"><span class="word-number">${word.id >= 1_000_000 ? '自訂' : String(word.id).padStart(2, '0')}</span><div><h3><button type="button" class="word-edit-title" data-edit="${word.id}" ${selected === 'deleted' ? 'disabled' : ''} aria-label="編輯 ${escape(word.word)}">${uiIcon('user', 'row-emoji')}<span lang="en">${escape(word.word)}</span><small>${escape(word.pos)}</small></button></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}${!word.example && !word.translation && !word.note ? '<p>尚未填寫例句或用法。</p>' : ''}</details></div><div class="row-actions">${actions}</div></article>`;
+    return `<article class="word-row"><span class="word-number">${word.id >= 1_000_000 ? '自訂' : String(word.id).padStart(2, '0')}</span><div><h3><button type="button" class="word-edit-title" data-edit="${word.id}" ${selected === 'deleted' ? 'disabled' : ''} aria-label="編輯 ${escape(word.word)}"><img src="./assets/dinotaeng/bobo.webp" class="row-emoji" alt="" aria-hidden="true"><span lang="en">${escape(word.word)}</span><small>${escape(word.pos)}</small></button></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}${!word.example && !word.translation && !word.note ? '<p>尚未填寫例句或用法。</p>' : ''}</details></div><div class="row-actions">${actions}</div></article>`;
   }).join('') : selected === 'deleted' && !deleted.length ? '<div class="empty"><strong>目前沒有已刪除的單字</strong>刪除的單字會保留在這裡，方便隨時復原。</div>' : WORDS.length || deleted.length ? '<div class="empty"><strong>沒有符合條件的單字</strong>試試其他關鍵字，或清除學習狀態篩選。</div>' : '<div class="empty"><strong>你的單字庫還是空的</strong>按上方「＋ 新增單字」，加入自己的第一個單字。</div>';
 }
 const dateLabel = at => /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : new Date(at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
