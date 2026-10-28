@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { emptyState, recordAnswer, updateWord, deleteWord, restoreWord } from '../dist/engine.js';
+import { emptyState, recordAnswer, updateWord, deleteWord, restoreWord, resetAllCards } from '../dist/engine.js';
 import { WORDS } from '../dist/data.js';
 
 test('actual PostgreSQL migration isolates users and rejects stale writes', async () => {
@@ -34,6 +34,9 @@ test('actual PostgreSQL migration isolates users and rejects stale writes', asyn
     const editableMigration = await readFile(new URL('../supabase/migrations/20261027181806_editable_vocabulary.sql', import.meta.url), 'utf8');
     await db.exec(editableMigration);
     await db.exec(editableMigration);
+    const resetMigration = await readFile(new URL('../supabase/migrations/20261028083601_reset_card_reviews.sql', import.meta.url), 'utf8');
+    await db.exec(resetMigration);
+    await db.exec(resetMigration);
     // A has a pre-existing legacy library; B is a brand-new account.
     await db.query('insert into public.santa_progress(user_id) values ($1)', [userA]);
     await db.exec('set role anon');
@@ -69,6 +72,16 @@ test('actual PostgreSQL migration isolates users and rejects stale writes', asyn
     await assert.rejects(db.query('select public.sync_santa_progress($1,4,$2)', [userA, staleEdit]), /Word changes are missing or stale/);
     const restoredA = structuredClone(deletedA); restoreWord(restoredA, WORDS, 1000001);
     await db.query('select public.sync_santa_progress($1,4,$2)', [userA, restoredA]);
+    const resetA=structuredClone(restoredA); resetAllCards(resetA);
+    result=await db.query('select public.sync_santa_progress($1,5,$2) as result',[userA,resetA]);
+    assert.equal(result.rows[0].result.applied,true);
+    assert.equal(result.rows[0].result.state.progress['23'].reviews,0);
+    assert.equal(result.rows[0].result.state.history.length,restoredA.history.length);
+    await assert.rejects(db.query('select public.sync_santa_progress($1,6,$2)',[userA,restoredA]),/Review reset is missing or stale/);
+    await assert.rejects(db.query('select public.sync_santa_progress($1,6,$2)',[userA,{...resetA,reviewReset:null}]),/Invalid review reset/);
+    const resetAgain=structuredClone(resetA); resetAllCards(resetAgain);
+    await db.query('select public.sync_santa_progress($1,6,$2)',[userA,resetAgain]);
+    await assert.rejects(db.query('select public.sync_santa_progress($1,7,$2)',[userA,resetA]),/Review reset is missing or stale/);
     await db.query("select set_config('request.jwt.claim.sub',$1,false)", [userB]);
     assert.equal((await db.query('select * from public.santa_progress')).rows.length, 0);
     const stateB = emptyState(false); recordAnswer(stateB, 47, false, 'quiz', 'test-B');

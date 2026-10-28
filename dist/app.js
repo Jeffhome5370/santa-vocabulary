@@ -1,5 +1,7 @@
+import { dailyKnownCount, loadGuestState, showEntry, sessionView } from './design.js';
+import { createSpeechPlayer, mountSpeechSettings } from './speech.js';
 import { WORDS as BASE_WORDS } from './data.js';
-import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
+import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState, resetAllCards } from './engine.js';
 import { createAccountClient, friendlyAuthError } from './account.js';
 import { createRemote, createSyncCoordinator, fingerprint } from './cloud-sync.js';
 import { mountWordAssistant } from './word-assistant.js';
@@ -7,7 +9,7 @@ import { mountWordAssistant } from './word-assistant.js';
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-let state = emptyState(), allowSave = true, storageWarning = false;
+let state = emptyState(false), allowSave = true, storageWarning = false;
 let WORDS = BASE_WORDS;
 let filter = 'all', order = WORDS.map(word => word.id), cards = [], position = 0, flipped = false, currentView = 'cards';
 let quiz = null, toastTimer;
@@ -15,9 +17,12 @@ let authClient = null, cloudSync = null, activeUser = null, authMode = 'signin',
 let reviewActor = crypto.randomUUID();
 let syncPhase = 'guest', syncDetail;
 let authReady = false, libraryReady = false;
+let guestChosen = false;
+let entranceRequested = location.hash === '#login';
 let editingWordId = null, editingWordSnapshot = null, pendingDeleteId = null, pendingDeleteSnapshot = null;
 const accountStorageKey = id => `${STORAGE_KEY}.user.${id}`;
 const activeStorageKey = () => activeUser ? accountStorageKey(activeUser.id) : STORAGE_KEY;
+const loadCurrentState = () => activeUser ? loadState(localStorage, BASE_WORDS, activeStorageKey()) : loadGuestState(localStorage, BASE_WORDS);
 const wordAssistant = mountWordAssistant({
   getClient: () => authClient, getUser: () => activeUser,
   getWords: () => allWords(BASE_WORDS, state),
@@ -38,7 +43,7 @@ function save({ upload = true } = {}) {
   }
   if (upload) cloudSync?.schedule();
 }
-try { state = loadState(localStorage, BASE_WORDS); }
+try { state = loadGuestState(localStorage, BASE_WORDS); }
 catch {
   allowSave = false;
   setTimeout(() => toast('原有進度無法讀取，目前以暫存模式練習。請匯出備份或匯入有效檔案；重設後可恢復儲存。', 12000), 0);
@@ -49,13 +54,20 @@ function renderStats() {
   const ids = new Set(WORDS.map(word => word.id));
   order = [...order.filter(id => ids.has(id)), ...WORDS.filter(word => !order.includes(word.id)).map(word => word.id)];
   const stats = getStats(WORDS, state);
-  $('#stats').innerHTML = `<div class="stat"><span class="stat-label">單字總數</span><strong>${stats.total}</strong><small>個單字</small></div><div class="stat"><span class="stat-label">已熟悉</span><strong>${stats.known}</strong><small>/ ${stats.total}</small><span class="stat-bar"><i style="width:${stats.total ? stats.known / stats.total * 100 : 0}%"></i></span></div><div class="stat weak"><span class="stat-label">待加強</span><strong>${stats.weak}</strong><small>個單字</small></div><div class="stat"><span class="stat-label">測驗正確率</span><strong>${stats.accuracy === null ? '—' : `${stats.accuracy}%`}</strong></div>`;
+  $('#stats').innerHTML = `<button type="button" class="stat stat-link" data-open-pocket aria-label="口袋裡的單字 ${stats.total} 個，開啟單字口袋"><img src="./assets/dinotaeng/pocket.webp" class="ui-emoji" alt="" aria-hidden="true"><span><span class="stat-label">口袋裡的單字</span><strong>${stats.total}</strong><small>個</small></span></button><div class="stat"><img src="./assets/dinotaeng/sparkle.webp" class="ui-emoji" alt="" aria-hidden="true"><div><span class="stat-label">已經變熟悉</span><strong>${stats.known}</strong><small>個</small></div></div>`;
+  const goal = dailyKnownCount(WORDS, state);
+  $('#goal-count').textContent = `${Math.min(goal, 10)} / 10`;
+  $('#goal-description').textContent = goal >= 10 ? '十顆棉花糖烤好了！記得休息一下。' : '烤熟 10 個不同的單字，慢慢累積。';
+  $('#marshmallows').innerHTML = Array.from({ length: 10 }, (_, i) => `<img class="marshmallow ${i < goal ? 'filled' : ''}" src="./assets/dinotaeng/marshmallow.webp" alt="" aria-hidden="true">`).join('');
+  $('#marshmallows').setAttribute('aria-label', `今天記住 ${goal} 個不同的單字`);
+  $('#extended-stats').textContent = `已複習 ${stats.reviewed}／${stats.total} 個 · 待加強 ${stats.weak} 個 · 測驗正確率 ${stats.accuracy === null ? '尚無測驗紀錄' : stats.accuracy + '%'}`;
   $('#all-count').textContent = WORDS.length;
   $('#weak-count').textContent = stats.weak;
   $('#deck-count').textContent = `${WORDS.length} 個單字`;
-  $('#footer-count').textContent = `${WORDS.length} WORDS · ENDLESS POSSIBILITIES`;
   $('#start-quiz').disabled = !ready || WORDS.length < 4;
   $('#open-add-word').disabled = !ready;
+  $('#reset-all-cards').disabled = !ready;
+  $('#confirm-reset-cards').disabled = !ready || !WORDS.length;
   $('#quiz-availability').textContent = !ready ? '正在載入你的單字庫…' : WORDS.length < 4 ? `目前 ${WORDS.length} 個單字；加入至少 4 個英文與意思各不相同的單字後，即可開始四選一。` : '優先安排待加強與尚未複習的單字。';
 }
 function statusBadge(word) {
@@ -95,10 +107,16 @@ function renderCard() {
   $('#front-word').textContent = enFront ? word.word : word.meaning;
   $('#front-word').lang = enFront ? 'en' : 'zh-Hant';
   $('#front-pos').textContent = word.pos;
+  for (const [id, english] of [['front-word', enFront], ['back-word', !enFront]]) {
+    const element = $('#' + id);
+    if (english) { element.dataset.say = 'word'; element.setAttribute('role', 'button'); element.setAttribute('tabindex', '0'); element.setAttribute('aria-label', '朗讀英文單字 ' + word.word); }
+    else { delete element.dataset.say; element.removeAttribute('role'); element.removeAttribute('tabindex'); element.removeAttribute('aria-label'); }
+  }
+
   $('#back-word').textContent = enFront ? word.meaning : word.word;
   $('#back-word').lang = enFront ? 'zh-Hant' : 'en';
   $('#back-secondary').textContent = enFront ? `${word.word} · ${word.pos}` : `${word.meaning} · ${word.pos}`;
-  $('#back-example').innerHTML = `<span lang="en">${escape(word.example)}</span><em>${escape(word.translation)}</em>`;
+  $('#back-example').innerHTML = `<span lang="en" data-say="example" role="button" tabindex="0" aria-label="朗讀英文例句">${escape(word.example)}</span><em>${escape(word.translation)}</em>`;
   $('#back-note').textContent = word.note;
   $('#back-note').hidden = !word.note;
   $('#card-status').textContent = badge.text;
@@ -140,6 +158,7 @@ function markCard(correct) {
 }
 function setView(view) {
   if (!['cards', 'quiz', 'library', 'progress', 'account'].includes(view)) return;
+  if (view === 'account' && !activeUser) { guestChosen = false; renderEntrance(); return; }
   currentView = view;
   $$('.view').forEach(section => { section.hidden = section.id !== `${view}-view`; });
   $$('.nav-item').forEach(button => {
@@ -222,8 +241,8 @@ function renderLibrary() {
     const p = getProgress(state, word.id), badge = statusBadge(word);
     const actions = selected === 'deleted'
       ? `<span class="badge">已刪除</span><button class="manage-word" data-restore="${word.id}" aria-label="復原 ${escape(word.word)}">復原</button>`
-      : `<span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button><button class="study-word" data-study="${word.id}" aria-label="翻卡複習 ${escape(word.word)}">翻卡 ↗</button><button class="manage-word" data-edit="${word.id}" aria-label="編輯 ${escape(word.word)}">編輯</button><button class="manage-word delete" data-delete="${word.id}" aria-label="刪除 ${escape(word.word)}">刪除</button>`;
-    return `<article class="word-row"><span class="word-number">${word.id >= 1_000_000 ? '自訂' : String(word.id).padStart(2, '0')}</span><div><h3 lang="en">${escape(word.word)}<small>${escape(word.pos)}</small></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}${!word.example && !word.translation && !word.note ? '<p>尚未填寫例句或用法。</p>' : ''}</details></div><div class="row-actions">${actions}</div></article>`;
+      : `<span class="badge ${badge.className}">${badge.text}</span><button class="star-button" data-star="${word.id}" aria-label="${p.starred ? '取消收藏' : '收藏'} ${escape(word.word)}" aria-pressed="${p.starred}">${p.starred ? '★' : '☆'}</button><button class="study-word" data-study="${word.id}" aria-label="翻卡複習 ${escape(word.word)}">翻卡 ↗</button><button class="manage-word delete" data-delete="${word.id}" aria-label="刪除 ${escape(word.word)}">刪除</button>`;
+    return `<article class="word-row"><span class="word-number">${word.id >= 1_000_000 ? '自訂' : String(word.id).padStart(2, '0')}</span><div><h3><button type="button" class="word-edit-title" data-edit="${word.id}" ${selected === 'deleted' ? 'disabled' : ''} aria-label="編輯 ${escape(word.word)}"><img src="./assets/dinotaeng/bobo.webp" class="row-emoji" alt="" aria-hidden="true"><span lang="en">${escape(word.word)}</span><small>${escape(word.pos)}</small></button></h3><p>${escape(word.meaning)}</p><details><summary>例句與用法</summary><p class="example-line" lang="en">${escape(word.example)}</p><p>${escape(word.translation)}</p>${word.note ? `<span class="card-note">${escape(word.note)}</span>` : ''}${!word.example && !word.translation && !word.note ? '<p>尚未填寫例句或用法。</p>' : ''}</details></div><div class="row-actions">${actions}</div></article>`;
   }).join('') : selected === 'deleted' && !deleted.length ? '<div class="empty"><strong>目前沒有已刪除的單字</strong>刪除的單字會保留在這裡，方便隨時復原。</div>' : WORDS.length || deleted.length ? '<div class="empty"><strong>沒有符合條件的單字</strong>試試其他關鍵字，或清除學習狀態篩選。</div>' : '<div class="empty"><strong>你的單字庫還是空的</strong>按上方「＋ 新增單字」，加入自己的第一個單字。</div>';
 }
 const dateLabel = at => /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : new Date(at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -252,16 +271,49 @@ function exportMarkdown() {
 }
 
 $$('[data-view]').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
+$('#stats').addEventListener('click', event => {
+  if (event.target.closest('[data-open-pocket]')) {
+    setView('library');
+    $('#search').focus({ preventScroll: true });
+  }
+});
 $$('[data-filter]').forEach(button => button.addEventListener('click', () => {
   filter = button.dataset.filter; position = 0;
   $$('[data-filter]').forEach(item => item.classList.toggle('selected', item.dataset.filter === filter));
   refreshCards();
 }));
-$('#flashcard').addEventListener('click', flipCard);
+const speechPlayer = createSpeechPlayer({ onError: message => toast(message) });
+mountSpeechSettings(speechPlayer, { voice: $('#speech-voice'), rate: $('#speech-rate'), status: $('#speech-status'), preview: $('#speech-preview') });
+function speakText(text) { speechPlayer.speak(text); }
+$('#flashcard').addEventListener('click', event => {
+  const speech = event.target.closest('[data-say]');
+  if (speech && cards.length) { event.stopPropagation(); speakText(speech.dataset.say === 'example' ? cards[position].example : cards[position].word); return; }
+  flipCard();
+});
+$('#card-stage').addEventListener('click', event => { if (!event.target.closest('#flashcard, #star-card, #speak')) flipCard(); });
 $('#previous').addEventListener('click', () => moveCard(-1));
 $('#next').addEventListener('click', () => moveCard(1));
 $('#mark-known').addEventListener('click', () => markCard(true));
 $('#mark-weak').addEventListener('click', () => markCard(false));
+let resetCardsContext = null;
+$('#reset-all-cards').addEventListener('click', () => {
+  resetCardsContext = activeStorageKey();
+  $('#reset-cards-scope').textContent = activeUser ? '重置會同步至你的帳號。其他裝置請重新整理網站，以取得最新進度。' : '重置會儲存在目前瀏覽器的訪客資料。';
+  $('#reset-cards-dialog').showModal();
+  $('#cancel-reset-cards').focus();
+});
+$('#cancel-reset-cards').addEventListener('click', () => $('#reset-cards-dialog').close());
+$('#confirm-reset-cards').addEventListener('click', () => {
+  if (resetCardsContext !== activeStorageKey() || !authReady || (activeUser && !libraryReady)) {
+    $('#reset-cards-dialog').close(); toast('帳號狀態已變更，請重新開啟重置確認。'); return;
+  }
+  resetAllCards(state); reviewActor = crypto.randomUUID();
+  save(); position = 0; filter = 'all';
+  $$('[data-filter]').forEach(button => button.classList.toggle('selected', button.dataset.filter === 'all'));
+  repaintProgress(); refreshCards();
+  $('#reset-cards-dialog').close(); $('#reset-all-cards').focus();
+  toast('所有翻卡已重置。單字、收藏與測驗紀錄已保留。');
+});
 $('#direction').addEventListener('change', renderCard);
 $('#shuffle').addEventListener('click', () => { order = shuffle(order); position = 0; refreshCards(); toast('已重新隨機排序。', 2000); });
 $('#star-card').addEventListener('click', () => {
@@ -276,18 +328,15 @@ $('#star-card').addEventListener('click', () => {
   }
 });
 $('#speak').addEventListener('click', () => {
-  if (!('speechSynthesis' in window)) { toast('此瀏覽器不支援朗讀功能。'); return; }
-  if (!cards.length) return;
-  speechSynthesis.cancel();
-  const speech = new SpeechSynthesisUtterance(cards[position].word); speech.lang = 'en-US'; speech.rate = .85;
-  speech.onerror = () => toast('目前無法播放發音，請稍後再試。');
-  speechSynthesis.speak(speech);
+  if (cards.length) speakText(cards[position].word);
 });
 document.addEventListener('keydown', event => {
-  if (currentView !== 'cards' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if ($('#app-shell').hidden || currentView !== 'cards' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
   const target = event.target;
+  const speech = target.closest('[data-say]');
+  if (speech && cards.length && (event.code === 'Space' || event.key === 'Enter')) { event.preventDefault(); speakText(speech.dataset.say === 'example' ? cards[position].example : cards[position].word); return; }
   if (target.closest('input,select,textarea,summary,a') || (target.closest('button') && target.id !== 'flashcard')) return;
-  if (event.code === 'Space') { event.preventDefault(); flipCard(); }
+  if (event.code === 'Space' || (event.key === 'Enter' && target.id === 'flashcard')) { event.preventDefault(); flipCard(); }
   else if (event.key === 'ArrowLeft') { event.preventDefault(); moveCard(-1); }
   else if (event.key === 'ArrowRight') { event.preventDefault(); moveCard(1); }
 });
@@ -435,7 +484,7 @@ $('#cancel-reset').addEventListener('click', () => {
 });
 $('#confirm-reset').addEventListener('click', () => {
   if (activeUser) { toast('請先登出，再重設此裝置的訪客紀錄。雲端紀錄不會被刪除。'); return; }
-  state = emptyState(); allowSave = true; save(); renderStats(); renderHistory(); refreshCards();
+  state = emptyState(false); allowSave = true; save(); renderStats(); renderHistory(); refreshCards();
   quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false;
   $('#reset-confirmation').hidden = true; $('#reset-progress').hidden = false;
   $('#reset-progress').focus();
@@ -443,7 +492,7 @@ $('#confirm-reset').addEventListener('click', () => {
 });
 window.addEventListener('storage', event => {
   if (event.key !== activeStorageKey()) return;
-  try { const other = loadState(localStorage, BASE_WORDS, activeStorageKey()); state = mergeStates(state, other, BASE_WORDS); repaintProgress(); cloudSync?.schedule(); }
+  try { const other = loadCurrentState(); state = mergeStates(state, other, BASE_WORDS); repaintProgress(); cloudSync?.schedule(); }
   catch { toast('其他分頁的進度無法讀取，目前的練習仍保留。'); }
 });
 function repaintProgress() {
@@ -480,7 +529,43 @@ function setAuthMode(mode) {
   $('#password-hint').hidden = !signup && !recovery;
   $('#auth-submit').textContent = { signin: '登入並同步 →', signup: '註冊帳號 →', forgot: '寄送重設密碼信 →', recovery: '更新密碼 →' }[mode];
   showAuthMessage('');
+  renderEntrance();
 }
+
+function renderEntrance() {
+  const entry = showEntry({ ready: authReady, signedIn: !!activeUser, guestChosen, recovery: authMode === 'recovery', requested: entranceRequested });
+  $('#entry-screen').hidden = !entry;
+  $('#app-shell').hidden = entry;
+  document.body.classList.toggle('entry-mode', entry);
+  const slot = entry ? $('#entry-auth-slot') : $('#account-auth-slot');
+  if ($('#account-panel').parentElement !== slot) slot.append($('#account-panel'));
+  $('#entry-guest').disabled = !authReady || authBusy;
+  $('#auth-submit').disabled = !authReady || authBusy;
+  $('#entry-guest').hidden = !!activeUser || authMode === 'recovery';
+  $('#entry-continue').hidden = !activeUser || !authReady || authMode === 'recovery';
+  $('#signed-in-account').hidden = !activeUser || entry;
+  $('.account-access-note').hidden = entry && !!activeUser;
+  $('#entry-heading').textContent = authMode === 'recovery' ? '設定新的登入密碼' : '歡迎回到單字室';
+  $('#entry-description').textContent = authMode === 'recovery' ? '更新密碼後，就能繼續你的單字練習。' : activeUser ? '你已登入，可以接著上次的練習。' : '登入帳號，接著上次的練習。';
+  $('.skip').href = entry ? '#entry-main' : '#main';
+}
+
+function leaveEntrance() {
+  entranceRequested = false;
+  if (location.hash === '#login') history.replaceState(null, '', location.pathname + location.search);
+}
+
+window.addEventListener('hashchange', () => { entranceRequested = location.hash === '#login'; renderEntrance(); });
+$('#entry-continue').addEventListener('click', () => {
+  leaveEntrance(); setView('cards'); renderEntrance(); $('#main').focus();
+});
+
+$('#entry-guest').addEventListener('click', () => {
+  if (!authReady || activeUser || authMode === 'recovery') return;
+  guestChosen = true;
+  leaveEntrance();
+  setView('cards'); renderEntrance(); $('#main').focus();
+});
 function setSyncStatus(phase, detail) {
   syncPhase = phase; syncDetail = detail;
   const labels = { guest: '訪客模式', syncing: '同步中…', synced: '已同步至雲端', offline: '離線中 · 等待同步', error: '尚未同步成功' };
@@ -510,7 +595,7 @@ function renderAccount() {
   $('#guest-import-offer').hidden = true;
   if (activeUser) {
     try {
-      const guest = guestForAccount(loadState(localStorage, BASE_WORDS), state);
+      const guest = guestForAccount(loadGuestState(localStorage, BASE_WORDS), state);
       const reviewed = getStats(allWords(BASE_WORDS, guest), guest).reviewed;
       const hasStars = Object.values(guest.progress).some(p => p.starred);
       const hasNew = fingerprint(mergeStates(state, guest, BASE_WORDS)) !== fingerprint(state);
@@ -521,9 +606,12 @@ function renderAccount() {
     } catch { /* A damaged guest backup must not block an account. */ }
     setSyncStatus(syncPhase === 'guest' ? 'syncing' : syncPhase, syncDetail);
   } else setSyncStatus('guest');
+  renderEntrance();
 }
 async function activateSession(session, event = '') {
   const next = session?.user || null;
+  const destination = sessionView(activeUser?.id, next?.id, event);
+  if (activeUser?.id !== next?.id) guestChosen = false;
   if (activeUser?.id !== next?.id) {
     cloudSync?.setUser(null);
     activeUser = next;
@@ -531,14 +619,15 @@ async function activateSession(session, event = '') {
     closeDeleteWord();
     reviewActor = crypto.randomUUID();
     syncPhase = 'guest'; syncDetail = undefined; $('#last-sync').textContent = '';
-    try { state = loadState(localStorage, BASE_WORDS, activeStorageKey()); libraryReady = !next || !!localStorage.getItem(activeStorageKey()); allowSave = true; }
-    catch { state = emptyState(); libraryReady = false; allowSave = false; showAuthMessage('此裝置的進度副本無法讀取；雲端同步會嘗試取回已保存的紀錄。', true); }
+    try { state = loadCurrentState(); libraryReady = !next || !!localStorage.getItem(activeStorageKey()); allowSave = true; }
+    catch { state = emptyState(false); libraryReady = false; allowSave = false; showAuthMessage('此裝置的進度副本無法讀取；雲端同步會嘗試取回已保存的紀錄。', true); }
     quiz = null; $('#quiz-active').hidden = true; $('#quiz-result').hidden = true; $('#quiz-setup').hidden = false;
     repaintProgress();
     cloudSync?.setUser(next?.id || null);
   } else if (next) activeUser = next;
   if (event === 'PASSWORD_RECOVERY') { setAuthMode('recovery'); setView('account'); }
   else if (authMode === 'recovery' && !next) setAuthMode('signin');
+  else if (destination && !entranceRequested) setView(destination);
   renderAccount();
   if (next) await cloudSync?.sync();
 }
@@ -568,7 +657,7 @@ async function initializeAccounts() {
 $$('[data-auth-mode]').forEach(button => button.addEventListener('click', () => setAuthMode(button.dataset.authMode)));
 $('#auth-form').addEventListener('submit', async event => {
   event.preventDefault();
-  if (!authClient || authBusy) return;
+  if (!authClient || !authReady || authBusy) return;
   if ((authMode === 'signup' || authMode === 'recovery') && $('#auth-password').value !== $('#auth-confirm').value) { showAuthMessage('兩次輸入的密碼不同，請再確認。', true); return; }
   authBusy = true; $('#auth-submit').disabled = true; showAuthMessage('處理中…');
   const email = $('#auth-email').value.trim(), password = $('#auth-password').value;
@@ -582,11 +671,11 @@ $('#auth-form').addEventListener('submit', async event => {
       setAuthMode('signin'); renderAccount(); showAuthMessage('密碼已更新。');
     } else if (authMode === 'signup') {
       const { data, error } = await authClient.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } }); if (error) throw error;
-      if (data.session) { await activateSession(data.session); showAuthMessage('帳號已建立，已啟用雲端同步。'); }
+      if (data.session) { leaveEntrance(); await activateSession(data.session); setView('cards'); showAuthMessage('帳號已建立，已啟用雲端同步。'); }
       else showAuthMessage('請檢查 Email，點選驗證信中的連結後再登入。若已註冊，可改用登入或忘記密碼。');
     } else {
       const { data, error } = await authClient.auth.signInWithPassword({ email, password }); if (error) throw error;
-      await activateSession(data.session); showAuthMessage('已登入。請確認上方的同步狀態。');
+      leaveEntrance(); await activateSession(data.session); setView('cards'); showAuthMessage('已登入。請確認上方的同步狀態。');
     }
   } catch (error) { showAuthMessage(friendlyAuthError(error), true); }
   finally { authBusy = false; $('#auth-submit').disabled = false; $('#auth-password').value = ''; $('#auth-confirm').value = ''; }
@@ -598,14 +687,14 @@ $('#sign-out').addEventListener('click', async () => {
   try {
     await cloudSync?.sync();
     const { error } = await authClient.auth.signOut({ scope: 'local' }); if (error) throw error;
-    await activateSession(null); setAuthMode('signin'); showAuthMessage('已登出。現在顯示這個瀏覽器的訪客進度。');
+    await activateSession(null); setAuthMode('signin'); showAuthMessage('已登出。登入後即可繼續練習。');
   } catch (error) { showAuthMessage(friendlyAuthError(error), true); }
   finally { authBusy = false; $('#sign-out').disabled = false; }
 });
 $('#merge-guest').addEventListener('click', async () => {
   if (!activeUser || !cloudSync) return;
   try {
-    state = mergeStates(state, guestForAccount(loadState(localStorage, BASE_WORDS), state), BASE_WORDS); allowSave = true; save(); repaintProgress(); renderAccount();
+    state = mergeStates(state, guestForAccount(loadGuestState(localStorage, BASE_WORDS), state), BASE_WORDS); allowSave = true; save(); repaintProgress(); renderAccount();
     const success = await cloudSync.sync();
     toast(success ? '訪客紀錄已加入帳號並同步。' : '訪客紀錄已加入此帳號的本機副本，等待雲端同步。');
   } catch { showAuthMessage('訪客紀錄無法讀取。請先匯出備份，原有帳號紀錄仍保留。', true); }
