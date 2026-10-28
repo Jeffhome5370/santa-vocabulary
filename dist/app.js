@@ -1,7 +1,7 @@
 import { dailyKnownCount, loadGuestState, showEntry, sessionView } from './design.js';
 import { createSpeechPlayer, mountSpeechSettings } from './speech.js';
 import { WORDS as BASE_WORDS } from './data.js';
-import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
+import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState, resetAllCards } from './engine.js';
 import { createAccountClient, friendlyAuthError } from './account.js';
 import { createRemote, createSyncCoordinator, fingerprint } from './cloud-sync.js';
 import { mountWordAssistant } from './word-assistant.js';
@@ -66,6 +66,8 @@ function renderStats() {
   $('#deck-count').textContent = `${WORDS.length} 個單字`;
   $('#start-quiz').disabled = !ready || WORDS.length < 4;
   $('#open-add-word').disabled = !ready;
+  $('#reset-all-cards').disabled = !ready;
+  $('#confirm-reset-cards').disabled = !ready || !WORDS.length;
   $('#quiz-availability').textContent = !ready ? '正在載入你的單字庫…' : WORDS.length < 4 ? `目前 ${WORDS.length} 個單字；加入至少 4 個英文與意思各不相同的單字後，即可開始四選一。` : '優先安排待加強與尚未複習的單字。';
 }
 function statusBadge(word) {
@@ -293,6 +295,25 @@ $('#previous').addEventListener('click', () => moveCard(-1));
 $('#next').addEventListener('click', () => moveCard(1));
 $('#mark-known').addEventListener('click', () => markCard(true));
 $('#mark-weak').addEventListener('click', () => markCard(false));
+let resetCardsContext = null;
+$('#reset-all-cards').addEventListener('click', () => {
+  resetCardsContext = activeStorageKey();
+  $('#reset-cards-scope').textContent = activeUser ? '重置會同步至你的帳號。重置後請使用此試作版繼續練習；舊版會停止同步，以免舊進度覆蓋重置結果。' : '重置會儲存在目前瀏覽器的訪客資料。';
+  $('#reset-cards-dialog').showModal();
+  $('#cancel-reset-cards').focus();
+});
+$('#cancel-reset-cards').addEventListener('click', () => $('#reset-cards-dialog').close());
+$('#confirm-reset-cards').addEventListener('click', () => {
+  if (resetCardsContext !== activeStorageKey() || !authReady || (activeUser && !libraryReady)) {
+    $('#reset-cards-dialog').close(); toast('帳號狀態已變更，請重新開啟重置確認。'); return;
+  }
+  resetAllCards(state); reviewActor = crypto.randomUUID();
+  save(); position = 0; filter = 'all';
+  $$('[data-filter]').forEach(button => button.classList.toggle('selected', button.dataset.filter === 'all'));
+  repaintProgress(); refreshCards();
+  $('#reset-cards-dialog').close(); $('#reset-all-cards').focus();
+  toast('所有翻卡已重置。單字、收藏與測驗紀錄已保留。');
+});
 $('#direction').addEventListener('change', renderCard);
 $('#shuffle').addEventListener('click', () => { order = shuffle(order); position = 0; refreshCards(); toast('已重新隨機排序。', 2000); });
 $('#star-card').addEventListener('click', () => {

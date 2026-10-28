@@ -104,6 +104,14 @@ export function restoreWord(state, base, id) {
 }
 const ACTOR = crypto.randomUUID();
 const emptyCounts = () => ({ baseCorrect: 0, baseWrong: 0, actors: {} });
+const clearReviews = p => ({ ...p, reviews: 0, correct: 0, wrong: 0, lastCorrect: null, lastReviewed: null, counts: emptyCounts() });
+
+export function resetAllCards(state) {
+  const at = new Date(Math.max(Date.now(), clock(state.reviewReset?.at) + 1)).toISOString();
+  state.reviewReset = { at, id: crypto.randomUUID() };
+  state.progress = Object.fromEntries(Object.entries(state.progress).map(([id, p]) => [id, { ...clearReviews(p), updatedAt: at }]));
+  state.history = state.history.filter(entry => entry.source === 'quiz');
+}
 const totals = counts => ({ correct: counts.baseCorrect + Object.values(counts.actors).reduce((sum, p) => sum + p.correct, 0), wrong: counts.baseWrong + Object.values(counts.actors).reduce((sum, p) => sum + p.wrong, 0) });
 export const shuffle = items => {
   const result = [...items];
@@ -181,6 +189,12 @@ export function validateState(input, words) {
   safe.includeBaseWords = input.includeBaseWords ?? true;
   safe.customWords = customWords;
   safe.wordChanges = validateWordChanges(input.wordChanges, words, customWords);
+  if (input.reviewReset !== undefined) {
+    const reset = input.reviewReset;
+    if (!reset || typeof reset.at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(reset.at) || !isDate(reset.at)
+      || typeof reset.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(reset.id)) fail();
+    safe.reviewReset = { at: reset.at, id: reset.id };
+  }
   for (const [key, p] of Object.entries(input.progress)) {
     if (!/^\d+$/.test(key) || !ids.has(Number(key)) || !p || typeof p !== 'object') fail();
     for (const field of ['reviews', 'correct', 'wrong']) if (!Number.isSafeInteger(p[field]) || p[field] < 0) fail();
@@ -211,6 +225,16 @@ export function validateState(input, words) {
 export function mergeStates(current, incoming, words) {
   const a = validateState(current, words), b = validateState(incoming, words);
   const result = emptyState();
+  const reset = [a.reviewReset, b.reviewReset].filter(Boolean)
+    .sort((x, y) => clock(y.at) - clock(x.at) || y.id.localeCompare(x.id))[0];
+  if (reset) {
+    result.reviewReset = { ...reset };
+    for (const side of [a, b]) {
+      if (side.reviewReset?.id === reset.id && side.reviewReset.at === reset.at) continue;
+      side.progress = Object.fromEntries(Object.entries(side.progress).map(([id, p]) => [id, clearReviews(p)]));
+      side.history = side.history.filter(entry => entry.source === 'quiz');
+    }
+  }
   result.includeBaseWords = a.includeBaseWords;
   const custom = new Map();
   for (const word of [...a.customWords, ...b.customWords]) {
