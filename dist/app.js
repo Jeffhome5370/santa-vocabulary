@@ -298,7 +298,7 @@ $('#mark-weak').addEventListener('click', () => markCard(false));
 let resetCardsContext = null;
 $('#reset-all-cards').addEventListener('click', () => {
   resetCardsContext = activeStorageKey();
-  $('#reset-cards-scope').textContent = activeUser ? '重置會同步至你的帳號。重置後請使用此試作版繼續練習；舊版會停止同步，以免舊進度覆蓋重置結果。' : '重置會儲存在目前瀏覽器的訪客資料。';
+  $('#reset-cards-scope').textContent = activeUser ? '重置會同步至你的帳號。其他裝置請重新整理網站，以取得最新進度。' : '重置會儲存在目前瀏覽器的訪客資料。';
   $('#reset-cards-dialog').showModal();
   $('#cancel-reset-cards').focus();
 });
