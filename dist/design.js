@@ -1,5 +1,14 @@
 import { visibleHistory, loadState } from './engine.js';
 
+export const showEntry = ({ ready, signedIn, guestChosen, recovery, requested = false }) =>
+  !ready || recovery || requested || (!signedIn && !guestChosen);
+
+// Session refreshes should never move someone away from the word they are editing.
+export function sessionView(previousUserId, nextUserId, event = '') {
+  if (event === 'PASSWORD_RECOVERY') return 'account';
+  return nextUserId && previousUserId !== nextUserId ? 'cards' : null;
+}
+
 // Guest visitors start without the shared starter deck. Keep their own additions
 // and saved reviews intact; account caches and cloud libraries are loaded separately.
 export function loadGuestState(storage, words) {

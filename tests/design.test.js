@@ -2,7 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyState, recordAnswer, deleteWord, allWords, addCustomWord, STORAGE_KEY, loadState } from '../dist/engine.js';
 import { WORDS } from '../dist/data.js';
-import { dailyKnownCount, taipeiDay, loadGuestState } from '../dist/design.js';
+import { dailyKnownCount, taipeiDay, loadGuestState, showEntry, sessionView } from '../dist/design.js';
+
+test('entrance waits for session discovery, permits guest choice, and protects password recovery', () => {
+  const context = {ready:false, signedIn:false, guestChosen:false, recovery:false};
+  assert.equal(showEntry(context),true);
+  assert.equal(showEntry({...context,ready:true}),true);
+  assert.equal(showEntry({...context,ready:true,guestChosen:true}),false);
+  assert.equal(showEntry({...context,ready:true,signedIn:true}),false);
+  assert.equal(showEntry({...context,ready:true,signedIn:true,requested:true}),true);
+  assert.equal(showEntry({...context,ready:true,signedIn:true,recovery:true}),true);
+  assert.equal(showEntry({...context,guestChosen:true}),true);
+});
+
+test('successful login opens cards while token refresh preserves the current editor', () => {
+  assert.equal(sessionView(null,'my-account','SIGNED_IN'),'cards');
+  assert.equal(sessionView('account-a','account-b','SIGNED_IN'),'cards');
+  assert.equal(sessionView('my-account','my-account','TOKEN_REFRESHED'),null);
+  assert.equal(sessionView('my-account','my-account','SIGNED_IN'),null);
+  assert.equal(sessionView('my-account','my-account','PASSWORD_RECOVERY'),'account');
+  assert.equal(sessionView('my-account',null,'SIGNED_OUT'),null);
+});
 
 test('fresh guests start empty and never read a signed-in account cache', () => {
   const account = emptyState();
