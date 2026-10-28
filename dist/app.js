@@ -1,4 +1,5 @@
 import { dailyKnownCount } from './design.js';
+import { createSpeechPlayer, mountSpeechSettings } from './speech.js';
 import { WORDS as BASE_WORDS } from './data.js';
 import { STORAGE_KEY, emptyState, allWords, visibleHistory, guestForAccount, addCustomWord, updateWord, deleteWord, restoreWord, isWordDeleted, shuffle, getProgress, recordAnswer, toggleStar, matchesFilter, getStats, selectQuizWords, createQuestion, quizCandidates, validateState, mergeStates, loadState } from './engine.js';
 import { createAccountClient, friendlyAuthError } from './account.js';
@@ -60,7 +61,6 @@ function renderStats() {
   $('#all-count').textContent = WORDS.length;
   $('#weak-count').textContent = stats.weak;
   $('#deck-count').textContent = `${WORDS.length} 個單字`;
-  $('#footer-count').textContent = `${WORDS.length} WORDS · ENDLESS POSSIBILITIES`;
   $('#start-quiz').disabled = !ready || WORDS.length < 4;
   $('#open-add-word').disabled = !ready;
   $('#quiz-availability').textContent = !ready ? '正在載入你的單字庫…' : WORDS.length < 4 ? `目前 ${WORDS.length} 個單字；加入至少 4 個英文與意思各不相同的單字後，即可開始四選一。` : '優先安排待加強與尚未複習的單字。';
@@ -270,14 +270,9 @@ $$('[data-filter]').forEach(button => button.addEventListener('click', () => {
   $$('[data-filter]').forEach(item => item.classList.toggle('selected', item.dataset.filter === filter));
   refreshCards();
 }));
-function speakText(text) {
-  if (!text) return;
-  if (!('speechSynthesis' in window)) { toast('此瀏覽器不支援朗讀功能。'); return; }
-  speechSynthesis.cancel();
-  const speech = new SpeechSynthesisUtterance(text); speech.lang = 'en-US'; speech.rate = .85;
-  speech.onerror = () => toast('目前無法播放發音，請稍後再試。');
-  speechSynthesis.speak(speech);
-}
+const speechPlayer = createSpeechPlayer({ onError: message => toast(message) });
+mountSpeechSettings(speechPlayer, { voice: $('#speech-voice'), rate: $('#speech-rate'), status: $('#speech-status'), preview: $('#speech-preview') });
+function speakText(text) { speechPlayer.speak(text); }
 $('#flashcard').addEventListener('click', event => {
   const speech = event.target.closest('[data-say]');
   if (speech && cards.length) { event.stopPropagation(); speakText(speech.dataset.say === 'example' ? cards[position].example : cards[position].word); return; }
@@ -302,12 +297,7 @@ $('#star-card').addEventListener('click', () => {
   }
 });
 $('#speak').addEventListener('click', () => {
-  if (!('speechSynthesis' in window)) { toast('此瀏覽器不支援朗讀功能。'); return; }
-  if (!cards.length) return;
-  speechSynthesis.cancel();
-  const speech = new SpeechSynthesisUtterance(cards[position].word); speech.lang = 'en-US'; speech.rate = .85;
-  speech.onerror = () => toast('目前無法播放發音，請稍後再試。');
-  speechSynthesis.speak(speech);
+  if (cards.length) speakText(cards[position].word);
 });
 document.addEventListener('keydown', event => {
   if (currentView !== 'cards' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;

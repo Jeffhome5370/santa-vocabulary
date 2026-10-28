@@ -29,6 +29,12 @@ GitHub Pages 每個儲存庫只有一個網站，因此這是不同路徑的預�
 
 ## 驗證與素材
 
-`npm test` 目前共 44 項測試，包含既有 PostgreSQL 隔離、同步衝突、字卡管理與 AI 保護，另加每日目標去重／跨日測試。`npm run check` 檢查全部原有及新 JavaScript。
+`npm test` 目前共 48 項測試，包含既有 PostgreSQL 隔離、同步衝突、字卡管理與 AI 保護，另加每日目標去重／跨日測試。`npm run check` 檢查全部原有及新 JavaScript。
 
 `dist/assets/dinotaeng/SOURCES.md` 保存素材來源。圖片採本機 WebP，不需要從 LINE 商店載入；原始完整素材庫及個人資料未加入儲存庫。
+
+## 發音調整
+
+移除頁尾三段文字。新增「發音設定」可選英文語音、語速及試聽，偏好只保存在裝置。自動模式優先選名稱帶 Natural／Neural／Premium／Enhanced 的英文語音，保留系統提供的其他聲音供選擇。預設使用正常語速；單字、例句及隱藏相容發音入口共用設定。語音清單延遲載入時自動更新，快速連點不會顯示預期中斷的錯誤。
+
+可用聲音取決於瀏覽器與系統；本次沒有另接付費語音服務。參考：https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis
