@@ -1,42 +1,25 @@
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 const [productionDist, trialDist, output] = process.argv.slice(2);
 if (!productionDist || !trialDist || !output) throw new Error('Usage: build-preview.mjs production/dist trial/dist output');
 await mkdir(output, { recursive: true });
 await cp(productionDist, output, { recursive: true });
-const preview = path.join(output, 'preview', 'dinotaeng');
-await mkdir(preview, { recursive: true });
-await cp(trialDist, preview, { recursive: true });
-// Email verification/recovery returns to the already allowlisted production URL.
-// Password login, synchronization and AI remain available directly in the preview.
-const app = path.join(preview, 'app.js');
-const engineHash = createHash('sha256').update(await readFile(path.join(preview, 'engine.js'))).digest('hex').slice(0, 12);
-for (const dependent of ['design.js', 'cloud-sync.js']) {
-  const filename = path.join(preview, dependent);
-  await writeFile(filename, (await readFile(filename, 'utf8')).replace("'./engine.js'", `'./engine.js?v=${engineHash}'`));
+// Reuse the complete dependency-aware compiler so every new module is versioned.
+const scratch = await mkdtemp(path.join(os.tmpdir(), 'santa-preview-'));
+try {
+  await promisify(execFile)(process.execPath, [fileURLToPath(new URL('./build-site.mjs', import.meta.url)), trialDist, scratch]);
+  await cp(path.join(scratch, 'preview', 'dinotaeng'), path.join(output, 'preview', 'dinotaeng'), { recursive: true });
+} finally {
+  if (path.dirname(path.resolve(scratch)) !== path.resolve(os.tmpdir()) || !path.basename(scratch).startsWith('santa-preview-')) throw new Error('Unexpected scratch path');
+  await rm(scratch, { recursive: true, force: true });
 }
-let appSource = (await readFile(app, 'utf8')).replace(
-  "const redirectTo = new URL('./', location.href).href;",
-  "const redirectTo = new URL('../../', location.href).href;"
-);
-// The new entry point must not import an older cached design module.
-for (const filename of ['engine.js', 'design.js', 'cloud-sync.js', 'speech.js']) {
-  const hash = createHash('sha256').update(await readFile(path.join(preview, filename))).digest('hex').slice(0, 12);
-  appSource = appSource.replace(`'./${filename}'`, `'./${filename}?v=${hash}'`);
-}
-await writeFile(app, appSource);
-// Pages uses browser/CDN caching. Tie the theme and entry module URL to content.
-const entry = path.join(preview, 'index.html');
-let html = await readFile(entry, 'utf8');
-for (const filename of ['dinotaeng.css', 'entry.css', 'app.js']) {
-  const hash = createHash('sha256').update(await readFile(path.join(preview, filename))).digest('hex').slice(0, 12);
-  html = html.replace(`./${filename}"`, `./${filename}?v=${hash}"`);
-}
-await writeFile(entry, html);
 const expected = await readFile(path.join(productionDist, 'index.html'));
 const actual = await readFile(path.join(output, 'index.html'));
 if (!expected.equals(actual)) throw new Error('Production entry point was changed while preparing preview');
 await writeFile(path.join(output, '.nojekyll'), '');
-console.log('Prepared unchanged main site plus preview/dinotaeng/');
+console.log('Prepared unchanged main site plus versioned preview/dinotaeng/');

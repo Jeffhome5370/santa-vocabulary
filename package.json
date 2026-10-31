@@ -6,7 +6,7 @@
   "description": "Santa 英文翻字卡與四選一複習",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check dist/app.js && node --check dist/engine.js && node --check dist/data.js && node --check dist/account.js && node --check dist/cloud-sync.js && node --check dist/config.js && node --check dist/word-assistant.js && node --check supabase/functions/vocabulary-assist/handler.js && node --check dist/design.js && node --check scripts/build-preview.mjs && node --check dist/speech.js && node --check scripts/build-site.mjs"
+    "check": "node --check dist/app.js && node --check dist/engine.js && node --check dist/data.js && node --check dist/account.js && node --check dist/cloud-sync.js && node --check dist/config.js && node --check dist/word-assistant.js && node --check supabase/functions/vocabulary-assist/handler.js && node --check dist/design.js && node --check scripts/build-preview.mjs && node --check dist/speech.js && node --check scripts/build-site.mjs && node --check dist/libraries.js && node --check dist/library-ui.js"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.12"
