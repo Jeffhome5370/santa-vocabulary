@@ -75,6 +75,7 @@ test('PostgreSQL libraries enforce public/private access, immutable ownership an
       grant execute on function auth.uid() to anon,authenticated;
       insert into auth.users values('${A}'),('${B}');`);
     await db.exec(await readFile(new URL('../supabase/migrations/20261031080803_shared_word_libraries.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261031085308_recoverable_library_deletion.sql',import.meta.url),'utf8'));
     await actor(A);
     const create=async visibility=>(await db.query("insert into public.santa_libraries(owner_id,name,visibility,content) values($1,'English',$2,$3) returning *",[A,visibility,content])).rows[0];
     const publicLib=await create('public'), privateLib=await create('private'), otherLib=await create('public');
@@ -106,6 +107,26 @@ test('PostgreSQL libraries enforce public/private access, immutable ownership an
     await assert.rejects(db.query('select public.sync_santa_library_progress($1,$2,2,$3)',[B,publicLib.id,learner]),/reset is missing or stale/);
     await actor(A);
     assert.equal((await db.query('select * from public.santa_library_progress')).rows[0].state.progress[word.id].correct,1);
+    const beforeDelete=(await db.query('select * from public.santa_libraries where id=$1',[publicLib.id])).rows[0];
+    await assert.rejects(db.query('select public.set_santa_library_deleted($1,$2,true)',[publicLib.id,beforeDelete.revision-1]),/Library changed/);
+    const removed=(await db.query('select public.set_santa_library_deleted($1,$2,true) result',[publicLib.id,beforeDelete.revision])).rows[0].result;
+    assert.ok(removed.deleted_at);
+    assert.deepEqual(removed.content,beforeDelete.content);
+    assert.equal((await db.query('select * from public.santa_library_progress')).rows[0].state.progress[word.id].correct,1);
+    await assert.rejects(db.query("update public.santa_libraries set name='Edit deleted' where id=$1",[publicLib.id]),/Restore the library/);
+    await assert.rejects(db.query('select public.sync_santa_library_progress($1,$2,1,$3)',[A,publicLib.id,owner]),/not accessible/);
+    await actor(B);
+    assert.equal((await db.query('select * from public.santa_libraries where id=$1',[publicLib.id])).rows.length,0);
+    await assert.rejects(db.query('select public.set_santa_library_deleted($1,$2,false)',[publicLib.id,removed.revision]),/Library changed/);
+    await assert.rejects(db.query('select public.sync_santa_library_progress($1,$2,2,$3)',[B,publicLib.id,reset]),/not accessible/);
+    assert.equal((await db.query('select * from public.santa_library_progress where library_id=$1',[publicLib.id])).rows[0].state.reviewReset.id,reset.reviewReset.id);
+    await actor(A);
+    const restored=(await db.query('select public.set_santa_library_deleted($1,$2,false) result',[publicLib.id,removed.revision])).rows[0].result;
+    assert.equal(restored.deleted_at,null); assert.equal(restored.visibility,'public'); assert.deepEqual(restored.content,beforeDelete.content);
+    await actor(B);
+    assert.equal((await db.query('select * from public.santa_libraries where id=$1',[publicLib.id])).rows.length,1);
+    assert.equal((await db.query('select * from public.santa_library_progress where library_id=$1',[publicLib.id])).rows[0].state.reviewReset.id,reset.reviewReset.id);
+    await actor(A);
     await db.query("update public.santa_libraries set visibility='private' where id=$1",[publicLib.id]);
     await actor(B);
     await assert.rejects(db.query('select public.sync_santa_library_progress($1,$2,2,$3)',[B,publicLib.id,reset]),/not accessible/);
@@ -113,5 +134,6 @@ test('PostgreSQL libraries enforce public/private access, immutable ownership an
     await assert.rejects(db.query('select * from public.santa_libraries'),/permission denied/);
     await assert.rejects(db.query('select * from public.santa_library_progress'),/permission denied/);
     await assert.rejects(db.query('select public.sync_santa_library_progress($1,$2,0,$3)',[A,publicLib.id,learner]),/permission denied/);
+    await assert.rejects(db.query('select public.set_santa_library_deleted($1,1,true)',[publicLib.id]),/permission denied/);
   } finally { await db.close(); }
 });

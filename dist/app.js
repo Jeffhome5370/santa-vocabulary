@@ -33,6 +33,16 @@ const wordAssistant = mountWordAssistant({
 const libraryPicker = mountLibraryPicker({
   getUser: () => activeUser, getRepository: () => libraryRepository, getLibrary: () => selectedLibrary,
   getState: () => state, base: BASE_WORDS, selectLibrary: switchLibrary,
+  removeLibrary: async library => {
+    const context = activeStorageKey();
+    if (!selectedLibrary || selectedLibrary.id !== library.id || !libraryEditable()) throw new Error('請重新開啟要刪除的單字庫。');
+    if (!await cloudSync?.sync()) throw new Error('請先確認雲端同步完成，再刪除單字庫，以保留最新學習進度。');
+    if (context !== activeStorageKey()) throw new Error('帳號或單字庫已切換，請重新開啟管理。');
+    await libraryRepository.remove(library);
+    if (context !== activeStorageKey()) return;
+    cloudSync?.dispose(); cloudSync=null;
+    await switchLibrary(PERSONAL_LIBRARY);
+  },
   contentChanged: library => { selectedLibrary = library; state = applyLibraryContent(state, library.content, BASE_WORDS); save({ upload:false }); repaintProgress(); libraryPicker.render(); },
   toast, openPocket: () => { setView('library'); $('#library-picker').focus(); },
 });

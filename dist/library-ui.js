@@ -1,9 +1,10 @@
 import { PERSONAL_LIBRARY, canEditLibrary, libraryContent, validateLibraryFields } from './libraries.js';
 
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
-export function mountLibraryPicker({ getUser, getRepository, getLibrary, getState, base, selectLibrary, contentChanged, toast, openPocket }) {
+export function mountLibraryPicker({ getUser, getRepository, getLibrary, getState, base, selectLibrary, removeLibrary, contentChanged, toast, openPocket }) {
   const $ = selector => document.querySelector(selector);
   let rows = [], offset = 0, hasMore = false, loading = false, generation = 0, accountId = null, editing = false, dialogKey, submitting = false;
+  let pendingDelete = null, trashRows = [], trashOffset = 0, trashMore = false, trashLoading = false, trashGeneration = 0;
   function render() {
     const user = getUser(), active = getLibrary();
     const own = rows.filter(row => row.owner_id === user?.id), others = rows.filter(row => row.owner_id !== user?.id);
@@ -16,6 +17,7 @@ export function mountLibraryPicker({ getUser, getRepository, getLibrary, getStat
     $('#manage-library').hidden = !active || !canEditLibrary(active, user?.id);
     $('#refresh-libraries').disabled = !user || loading;
     $('#library-discovery').hidden = !user;
+    $('#library-trash').hidden = !user;
     $('#library-load-more').hidden = !hasMore;
     $('#library-load-more').disabled = loading;
     $('#library-current-name').textContent = active?.name || '我的私人單字口袋';
@@ -23,6 +25,26 @@ export function mountLibraryPicker({ getUser, getRepository, getLibrary, getStat
     $('#library-access-note').textContent = !user ? '登入後即可建立多個單字庫，或練習其他人公開分享的單字庫。訪客口袋維持獨立。' : active && !canEditLibrary(active,user.id) ? '你正在練習他人分享的單字庫，內容由建立者管理；收藏與學習紀錄只屬於你。' : active?.visibility === 'public' ? '這份單字庫已公開；新增、編輯與刪除的內容也會更新給其他使用者。學習進度仍各自保存。' : '目前內容僅自己可見。建立新單字庫時，可選擇是否公開分享。';
     $('#active-library-name').textContent = active?.name || '我的私人單字口袋';
     $('#library-catalog').innerHTML = rows.length ? rows.map(row => `<article class="library-tile"><span class="library-tile-tag">${row.owner_id === user?.id ? '我的單字庫' : '公開分享'}${row.visibility === 'private' ? ' · 私人' : ''}</span><h3>${esc(row.name)}</h3><p>${esc(row.description || '一起多認識一些單字。')}</p><div><small>${row.owner_id === user?.id ? '由你建立' : esc(row.creator_name)}</small><button type="button" class="text-button" data-select-library="${esc(row.id)}">${row.id === active?.id ? '目前檢視中' : '開啟單字庫 ↗'}</button></div></article>`).join('') : `<p class="muted">${loading ? '正在載入單字庫…' : '目前沒有符合的單字庫。可以建立第一份，再邀請大家一起練習。'}</p>`;
+  }
+  function renderTrash() {
+    $('#library-trash-list').innerHTML = trashRows.map(row => `<article class="library-trash-row"><div><strong>${esc(row.name)}</strong><small>刪除於 ${esc(new Date(row.deleted_at).toLocaleDateString('zh-TW'))}</small></div><button type="button" class="button outline" data-restore-library="${esc(row.id)}" ${trashLoading ? 'disabled' : ''}>復原單字庫</button></article>`).join('');
+    $('#library-trash-more').hidden = !trashMore;
+    $('#library-trash-more').disabled = trashLoading;
+  }
+  async function refreshTrash({ more = false } = {}) {
+    const user = getUser(); if (!user || !getRepository()) return;
+    const token = ++trashGeneration, id = user.id;
+    trashLoading = true;
+    if (!more) { trashRows=[]; trashOffset=0; }
+    renderTrash(); $('#library-trash-status').textContent='正在載入已刪除單字庫…';
+    try {
+      const page = await getRepository().listDeleted(id,{offset:trashOffset});
+      if (token !== trashGeneration || getUser()?.id !== id) return;
+      trashRows=[...trashRows,...page].filter((row,i,all)=>all.findIndex(item=>item.id===row.id)===i);
+      trashOffset+=page.length; trashMore=page.length===50;
+      $('#library-trash-status').textContent=trashRows.length ? '復原後會恢復原本分享範圍，單字與學習進度也會保留。' : '目前沒有已刪除的單字庫。';
+    } catch { if (token===trashGeneration) $('#library-trash-status').textContent='無法載入，請稍後重新開啟此區重試。'; }
+    finally { if(token===trashGeneration) {trashLoading=false;renderTrash();} }
   }
   async function refresh({ more = false } = {}) {
     const user = getUser();
@@ -59,6 +81,10 @@ export function mountLibraryPicker({ getUser, getRepository, getLibrary, getStat
     $('#library-creator').value = manage ? library.creator_name : '';
     $('#library-visibility').value = manage ? library.visibility : 'private';
     $('#library-copy-field').hidden = manage;
+    pendingDelete=null;
+    $('#delete-library').hidden=!manage;
+    $('#library-delete-confirmation').hidden=true;
+    $('#save-library').disabled=false;
     $('#save-library').textContent = manage ? '儲存設定' : '建立單字庫';
     $('#library-dialog').showModal(); $('#library-name').focus();
   }
@@ -70,10 +96,54 @@ export function mountLibraryPicker({ getUser, getRepository, getLibrary, getStat
   $('#create-library').addEventListener('click', () => openDialog(false));
   $('#manage-library').addEventListener('click', () => openDialog(true));
   $('#cancel-library').addEventListener('click', () => $('#library-dialog').close());
+  $('#delete-library').addEventListener('click', () => {
+    const user=getUser(), active=getLibrary();
+    if (submitting || !editing || !active || !canEditLibrary(active,user?.id) || `${user.id}:${active.id}`!==dialogKey) return;
+    pendingDelete={...active};
+    $('#library-delete-description').textContent=`確定要刪除「${active.name}」嗎？刪除後其他人也無法再開啟這份單字庫。單字與所有人的學習進度會保留，可在「已刪除單字庫」復原。`;
+    $('#library-delete-confirmation').hidden=false; $('#delete-library').hidden=true; $('#save-library').disabled=true;
+    $('#cancel-delete-library').focus();
+  });
+  $('#cancel-delete-library').addEventListener('click', () => {
+    if(submitting) return;
+    pendingDelete=null; $('#library-delete-confirmation').hidden=true; $('#delete-library').hidden=false; $('#save-library').disabled=false;
+    $('#delete-library').focus();
+  });
+  $('#confirm-delete-library').addEventListener('click', async () => {
+    if(submitting || !pendingDelete) return;
+    const user=getUser(), active=getLibrary(), key=`${user?.id}:${active?.id || PERSONAL_LIBRARY}`;
+    if(!user || key!==dialogKey || active?.id!==pendingDelete.id || !canEditLibrary(active,user.id)) {$('#library-dialog').close();return;}
+    submitting=true; $('#confirm-delete-library').disabled=true; $('#cancel-delete-library').disabled=true; $('#library-form-message').textContent='正在同步並刪除單字庫…';
+    try {
+      await removeLibrary(pendingDelete);
+      if(getUser()?.id!==user.id) return;
+      pendingDelete=null; $('#library-dialog').close(); $('#library-delete-confirmation').hidden=true;
+      toast('單字庫已刪除，可在「已刪除單字庫」復原。');
+      void refresh(); if($('#library-trash').open) void refreshTrash();
+    } catch { if(getUser()?.id===user.id) $('#library-form-message').textContent='刪除尚未完成。請確認連線與同步狀態；如果單字庫剛被更新，請關閉視窗、重新載入後再試。'; }
+    finally { submitting=false; $('#confirm-delete-library').disabled=false; $('#cancel-delete-library').disabled=false; $('#save-library').disabled=!!pendingDelete; render(); }
+  });
+  $('#library-trash').addEventListener('toggle', () => {if($('#library-trash').open) void refreshTrash();});
+  $('#library-trash-more').addEventListener('click', () => {if(!trashLoading) void refreshTrash({more:true});});
+  $('#library-trash-list').addEventListener('click', async event => {
+    const button=event.target.closest('[data-restore-library]');
+    if(!button || trashLoading) return;
+    const library=trashRows.find(row=>row.id===button.dataset.restoreLibrary), user=getUser();
+    if(!library || library.owner_id!==user?.id) return;
+    const token=++trashGeneration;
+    trashLoading=true; renderTrash();
+    try {
+      await getRepository().restore(library);
+      if(getUser()?.id!==user.id || token!==trashGeneration) return;
+      toast('單字庫已復原，原有單字與學習進度已保留。');
+      void refresh(); await refreshTrash();
+    } catch { if(getUser()?.id===user.id && token===trashGeneration) $('#library-trash-status').textContent='復原尚未完成，請確認連線後重新開啟此區再試。'; }
+    finally {if(token===trashGeneration) {trashLoading=false;renderTrash();}}
+  });
   $('#active-library-pocket').addEventListener('click', openPocket);
   $('#library-form').addEventListener('submit', async event => {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || pendingDelete) return;
     const user = getUser(), active = getLibrary(), key = `${user?.id}:${active?.id || PERSONAL_LIBRARY}`;
     if (!user || key !== dialogKey) { $('#library-dialog').close(); return; }
     submitting = true; $('#save-library').disabled = true;
@@ -97,6 +167,8 @@ export function mountLibraryPicker({ getUser, getRepository, getLibrary, getStat
       const id = getUser()?.id || null;
       if (id === accountId) { render(); return; }
       accountId=id; generation++; rows=[]; offset=0; hasMore=false; loading=false;
+      trashGeneration++; trashRows=[]; trashOffset=0; trashMore=false; trashLoading=false; pendingDelete=null;
+      $('#library-trash').open=false; $('#library-trash-status').textContent=''; renderTrash();
       $('#library-dialog').close(); $('#library-catalog-search').value=''; $('#library-catalog-status').textContent='';
       render(); if (id) void refresh();
     },
