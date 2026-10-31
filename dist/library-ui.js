@@ -1,30 +1,46 @@
 import { PERSONAL_LIBRARY, canEditLibrary, libraryContent, validateLibraryFields } from './libraries.js';
 
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
-export function mountLibraryPicker({ getUser, getRepository, getLibrary, getState, base, selectLibrary, removeLibrary, contentChanged, toast, openPocket }) {
+export function mountLibraryPicker({ getUser, getRepository, getLibrary, getState, base, selectLibrary, sharePersonal, removeLibrary, contentChanged, toast, openPocket }) {
   const $ = selector => document.querySelector(selector);
   let rows = [], offset = 0, hasMore = false, loading = false, generation = 0, accountId = null, editing = false, dialogKey, submitting = false;
   let pendingDelete = null, trashRows = [], trashOffset = 0, trashMore = false, trashLoading = false, trashGeneration = 0;
+  let personalSharing=null, personalMode=false, sharingKnown=false;
   function render() {
     const user = getUser(), active = getLibrary();
-    const own = rows.filter(row => row.owner_id === user?.id), others = rows.filter(row => row.owner_id !== user?.id);
+    const own = rows.filter(row => row.owner_id === user?.id && !row.source_personal), others = rows.filter(row => row.owner_id !== user?.id);
+    const pocketPublic=personalSharing?.visibility==='public';
+    const pocketLabel=pocketPublic ? `${personalSharing.name}（已公開）` : user && !sharingKnown ? '我的單字口袋（確認分享狀態中）' : '我的私人單字口袋';
     const options = list => list.map(row => `<option value="${esc(row.id)}">${esc(row.name)}${row.owner_id === user?.id ? '' : ' · '+esc(row.creator_name)}</option>`).join('');
     const extra = active && !rows.some(row => row.id === active.id) ? options([active]) : '';
-    $('#library-picker').innerHTML = `<option value="${PERSONAL_LIBRARY}">我的私人單字口袋</option>${extra}<optgroup label="我的單字庫">${options(own)}</optgroup><optgroup label="大家的公開單字庫">${options(others)}</optgroup>`;
+    $('#library-picker').innerHTML = `<option value="${PERSONAL_LIBRARY}">${esc(pocketLabel)}</option>${extra}<optgroup label="我的單字庫">${options(own)}</optgroup><optgroup label="大家的公開單字庫">${options(others)}</optgroup>`;
     $('#library-picker').value = active?.id || PERSONAL_LIBRARY;
     $('#library-picker').disabled = !user || loading;
     $('#create-library').disabled = !user || loading;
-    $('#manage-library').hidden = !active || !canEditLibrary(active, user?.id);
+    $('#manage-library').hidden = !user || !!active && !canEditLibrary(active, user.id);
+    $('#manage-library').textContent=active ? '管理單字庫' : '口袋分享設定';
+    $('#manage-library').disabled=loading || !active && !sharingKnown;
     $('#refresh-libraries').disabled = !user || loading;
     $('#library-discovery').hidden = !user;
     $('#library-trash').hidden = !user;
     $('#library-load-more').hidden = !hasMore;
     $('#library-load-more').disabled = loading;
-    $('#library-current-name').textContent = active?.name || '我的私人單字口袋';
+    $('#library-current-name').textContent = active?.name || pocketLabel;
     $('#library-current-description').textContent = active ? `${active.description || '把想學會的單字，慢慢收進來。'} · ${active.visibility === 'public' ? '公開分享' : '僅自己可見'} · ${canEditLibrary(active,user?.id) ? '由你建立' : '分享者：'+active.creator_name}` : '原有單字與學習紀錄都保留在這裡，只有你能看見。';
     $('#library-access-note').textContent = !user ? '登入後即可建立多個單字庫，或練習其他人公開分享的單字庫。訪客口袋維持獨立。' : active && !canEditLibrary(active,user.id) ? '你正在練習他人分享的單字庫，內容由建立者管理；收藏與學習紀錄只屬於你。' : active?.visibility === 'public' ? '這份單字庫已公開；新增、編輯與刪除的內容也會更新給其他使用者。學習進度仍各自保存。' : '目前內容僅自己可見。建立新單字庫時，可選擇是否公開分享。';
-    $('#active-library-name').textContent = active?.name || '我的私人單字口袋';
-    $('#library-catalog').innerHTML = rows.length ? rows.map(row => `<article class="library-tile"><span class="library-tile-tag">${row.owner_id === user?.id ? '我的單字庫' : '公開分享'}${row.visibility === 'private' ? ' · 私人' : ''}</span><h3>${esc(row.name)}</h3><p>${esc(row.description || '一起多認識一些單字。')}</p><div><small>${row.owner_id === user?.id ? '由你建立' : esc(row.creator_name)}</small><button type="button" class="text-button" data-select-library="${esc(row.id)}">${row.id === active?.id ? '目前檢視中' : '開啟單字庫 ↗'}</button></div></article>`).join('') : `<p class="muted">${loading ? '正在載入單字庫…' : '目前沒有符合的單字庫。可以建立第一份，再邀請大家一起練習。'}</p>`;
+    if(!active && pocketPublic) {
+      $('#library-current-description').textContent=`${personalSharing.description || '和大家一起多認識一些單字。'} · 公開分享 · 你的原有口袋`;
+      $('#library-access-note').textContent='這份口袋已公開分享，後續新增、編輯與刪除的單字同步後也會更新公開內容。Email、收藏與學習進度維持私人；可在「口袋分享設定」改回私人。';
+    } else if(!active && user) $('#library-access-note').textContent='目前內容僅自己可見。可在「口袋分享設定」選擇公開，讓其他登入使用者一起閱讀與練習。';
+    if(!active && user && !sharingKnown) {
+      $('#library-current-description').textContent='原有單字與個人學習紀錄都保留在這裡。';
+      $('#library-access-note').textContent='正在確認口袋的分享設定；若連線失敗，請按「逛逛大家的單字庫」中的「重新載入」。';
+    }
+    $('#active-library-name').textContent = active?.name || pocketLabel;
+    $('#library-catalog').innerHTML = rows.length ? rows.map(row => {
+      const ownPocket=row.source_personal && row.owner_id===user?.id;
+      return `<article class="library-tile"><span class="library-tile-tag">${ownPocket ? '我的口袋分享' : row.owner_id === user?.id ? '我的單字庫' : '公開分享'}${row.visibility === 'private' ? ' · 私人' : ''}</span><h3>${esc(row.name)}</h3><p>${esc(row.description || '一起多認識一些單字。')}</p><div><small>${row.owner_id === user?.id ? '由你建立' : esc(row.creator_name)}</small><button type="button" class="text-button" data-select-library="${esc(ownPocket ? PERSONAL_LIBRARY : row.id)}">${row.id === active?.id || ownPocket && !active ? '目前檢視中' : '開啟單字庫 ↗'}</button></div></article>`;
+    }).join('') : `<p class="muted">${loading ? '正在載入單字庫…' : '目前沒有符合的單字庫。可以建立第一份，再邀請大家一起練習。'}</p>`;
   }
   function renderTrash() {
     $('#library-trash-list').innerHTML = trashRows.map(row => `<article class="library-trash-row"><div><strong>${esc(row.name)}</strong><small>刪除於 ${esc(new Date(row.deleted_at).toLocaleDateString('zh-TW'))}</small></div><button type="button" class="button outline" data-restore-library="${esc(row.id)}" ${trashLoading ? 'disabled' : ''}>復原單字庫</button></article>`).join('');
@@ -54,9 +70,10 @@ export function mountLibraryPicker({ getUser, getRepository, getLibrary, getStat
     if (!more) { rows = []; offset = 0; }
     render(); $('#library-catalog-status').textContent = '正在載入單字庫…';
     try {
-      const page = await getRepository().list(id, { offset, search: $('#library-catalog-search').value });
+      const [page,sharing] = await Promise.all([getRepository().list(id, { offset, search: $('#library-catalog-search').value }),getRepository().getPersonalSharing(id)]);
       if (token !== generation || getUser()?.id !== id) return;
       rows = [...rows, ...page].filter((row, i, all) => all.findIndex(item => item.id === row.id) === i);
+      personalSharing=sharing; sharingKnown=true;
       offset += page.length; hasMore = page.length === 50;
       $('#library-catalog-status').textContent = `${rows.length} 份可檢視的單字庫${hasMore ? '，可繼續載入' : ''}`;
     } catch {
@@ -71,21 +88,25 @@ export function mountLibraryPicker({ getUser, getRepository, getLibrary, getStat
     finally { loading = false; render(); }
   }
   function openDialog(manage) {
+    if(submitting) return;
     const user = getUser(), library = getLibrary();
     if (!user || manage && !canEditLibrary(library,user.id)) return;
-    editing = manage; dialogKey = `${user.id}:${library?.id || PERSONAL_LIBRARY}`;
+    editing = manage; personalMode=manage && !library; dialogKey = `${user.id}:${library?.id || PERSONAL_LIBRARY}`;
+    if(personalMode && !sharingKnown) return;
+    const settings=personalMode ? personalSharing : library;
     $('#library-form').reset(); $('#library-form-message').textContent = '';
-    $('#library-dialog-title').textContent = manage ? '管理這份單字庫' : '建立一個新的單字庫';
-    $('#library-name').value = manage ? library.name : '';
-    $('#library-description').value = manage ? library.description : '';
-    $('#library-creator').value = manage ? library.creator_name : '';
-    $('#library-visibility').value = manage ? library.visibility : 'private';
+    $('#library-dialog-title').textContent = personalMode ? '我的單字口袋 · 分享設定' : manage ? '管理這份單字庫' : '建立一個新的單字庫';
+    $('#library-name').value = manage ? settings?.name || '我的單字口袋' : '';
+    $('#library-description').value = manage ? settings?.description || '' : '';
+    $('#library-creator').value = manage ? settings?.creator_name || '' : '';
+    $('#library-visibility').value = manage ? settings?.visibility || 'private' : 'private';
+    $('#personal-pocket-share-note').hidden=!personalMode;
     $('#library-copy-field').hidden = manage;
     pendingDelete=null;
-    $('#delete-library').hidden=!manage;
+    $('#delete-library').hidden=!manage || personalMode;
     $('#library-delete-confirmation').hidden=true;
     $('#save-library').disabled=false;
-    $('#save-library').textContent = manage ? '儲存設定' : '建立單字庫';
+    $('#save-library').textContent = personalMode ? '儲存分享設定' : manage ? '儲存設定' : '建立單字庫';
     $('#library-dialog').showModal(); $('#library-name').focus();
   }
   $('#library-picker').addEventListener('change', event => { void choose(event.target.value); });
@@ -146,27 +167,30 @@ export function mountLibraryPicker({ getUser, getRepository, getLibrary, getStat
     if (submitting || pendingDelete) return;
     const user = getUser(), active = getLibrary(), key = `${user?.id}:${active?.id || PERSONAL_LIBRARY}`;
     if (!user || key !== dialogKey) { $('#library-dialog').close(); return; }
+    const sharingForm=personalMode, managingForm=editing, sharingSnapshot=personalSharing;
     submitting = true; $('#save-library').disabled = true;
     try {
       const fields = validateLibraryFields(Object.fromEntries(new FormData(event.currentTarget)));
       const repository = getRepository();
       const content = $('#library-copy').checked ? libraryContent(getState(),base) : { includeBaseWords:false, customWords:[], wordChanges:[] };
-      const result = editing ? await repository.update(active, fields) : await repository.create(user.id, fields, content);
+      const result = sharingForm ? await sharePersonal(fields,sharingSnapshot) : managingForm ? await repository.update(active, fields) : await repository.create(user.id, fields, content);
       if (`${getUser()?.id}:${getLibrary()?.id || PERSONAL_LIBRARY}` !== key) return;
-      if (editing) contentChanged(result);
+      if(sharingForm) personalSharing=result;
+      else if (managingForm) contentChanged(result);
       else await selectLibrary(result.id);
       $('#library-dialog').close();
-      toast(editing ? '單字庫設定已儲存。' : '新單字庫已建立，可以開始加入單字。');
+      toast(sharingForm ? fields.visibility==='public' ? '單字口袋已公開，其他人可以閱讀與練習；個人進度維持私人。' : '單字口袋已設為私人，其他人無法再開啟。' : managingForm ? '單字庫設定已儲存。' : '新單字庫已建立，可以開始加入單字。');
       void refresh();
     } catch(error) { if (`${getUser()?.id}:${getLibrary()?.id || PERSONAL_LIBRARY}` === key) $('#library-form-message').textContent = error.message || '儲存失敗，請稍後再試。'; }
     finally { submitting=false; $('#save-library').disabled=false; render(); }
   });
   return {
-    render, refresh,
+    render, refresh, personalSharing: () => personalSharing,
     accountChanged() {
       const id = getUser()?.id || null;
       if (id === accountId) { render(); return; }
       accountId=id; generation++; rows=[]; offset=0; hasMore=false; loading=false;
+      personalSharing=null; personalMode=false; sharingKnown=false;
       trashGeneration++; trashRows=[]; trashOffset=0; trashMore=false; trashLoading=false; pendingDelete=null;
       $('#library-trash').open=false; $('#library-trash-status').textContent=''; renderTrash();
       $('#library-dialog').close(); $('#library-catalog-search').value=''; $('#library-catalog-status').textContent='';

@@ -17,7 +17,7 @@ export function applyLibraryContent(state, content, base) {
     history: (state.history || []).filter(entry => ids.has(entry.wordId)),
   }, base);
 }
-export const canEditLibrary = (library, userId) => !library || !!userId && library.owner_id === userId && !library.deleted_at;
+export const canEditLibrary = (library, userId) => !library || !!userId && library.owner_id === userId && !library.deleted_at && !library.source_personal;
 export function validateLibraryFields(fields) {
   const name = String(fields.name || '').trim(), description = String(fields.description || '').trim();
   const creator_name = String(fields.creator_name || '').trim() || '單字同好';
@@ -25,7 +25,7 @@ export function validateLibraryFields(fields) {
   if (!['public', 'private'].includes(fields.visibility)) throw new Error('請選擇單字庫的分享範圍。');
   return { name, description, creator_name, visibility: fields.visibility };
 }
-const metadata = 'id,owner_id,name,description,creator_name,visibility,revision,created_at,updated_at,deleted_at';
+const metadata = 'id,owner_id,name,description,creator_name,visibility,revision,created_at,updated_at,deleted_at,source_personal';
 export function createLibraryRepository(client) {
   async function request(builder) {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
@@ -49,6 +49,13 @@ export function createLibraryRepository(client) {
     },
     async create(userId, fields, content) {
       return await request(client.from('santa_libraries').insert({ owner_id: userId, ...validateLibraryFields(fields), content }).select('*').single());
+    },
+    async getPersonalSharing(userId) {
+      return await request(client.from('santa_libraries').select(metadata).eq('owner_id', userId).eq('source_personal',true).maybeSingle());
+    },
+    async sharePersonal(userId, fields, revision) {
+      const safe=validateLibraryFields(fields);
+      return await request(client.rpc('share_santa_personal_pocket',{p_expected_user_id:userId,p_base_revision:revision,p_name:safe.name,p_description:safe.description,p_creator_name:safe.creator_name,p_visibility:safe.visibility}));
     },
     async update(library, fields) {
       const row = await request(client.from('santa_libraries').update(fields).eq('id', library.id).eq('revision', library.revision).select('*').maybeSingle());

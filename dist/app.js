@@ -33,6 +33,17 @@ const wordAssistant = mountWordAssistant({
 const libraryPicker = mountLibraryPicker({
   getUser: () => activeUser, getRepository: () => libraryRepository, getLibrary: () => selectedLibrary,
   getState: () => state, base: BASE_WORDS, selectLibrary: switchLibrary,
+  sharePersonal: async (fields, snapshot) => {
+    const context=activeStorageKey(), userId=activeUser?.id;
+    if(!userId || selectedLibrary || librarySwitchBusy || libraryWriteBusy) throw new Error('請先開啟自己的單字口袋，再調整分享設定。');
+    if(!await cloudSync?.sync()) throw new Error('請先完成雲端同步，再變更分享範圍，以確保公開的是最新單字。');
+    if(context!==activeStorageKey()) throw new Error('帳號或單字庫已切換，請重新開啟分享設定。');
+    const latest=await libraryRepository.getPersonalSharing(userId);
+    if(context!==activeStorageKey()) throw new Error('帳號或單字庫已切換，請重新開啟分享設定。');
+    const settings = row => row ? [row.name,row.description,row.creator_name,row.visibility] : null;
+    if(fingerprint(settings(latest))!==fingerprint(settings(snapshot))) throw new Error('分享設定剛在其他裝置更新。請重新載入單字庫，再開啟設定。');
+    return await libraryRepository.sharePersonal(userId,fields,latest?.revision || 0);
+  },
   removeLibrary: async library => {
     const context = activeStorageKey();
     if (!selectedLibrary || selectedLibrary.id !== library.id || !libraryEditable()) throw new Error('請重新開啟要刪除的單字庫。');
@@ -427,6 +438,8 @@ function openWordForm(word = null) {
   $('#save-word-button').textContent = word ? '儲存修改 →' : '加入單字庫 →';
   $('#add-word-storage').textContent = word ? `修改會保留原有學習紀錄與收藏。${activeUser ? '只更新你的帳號，並自動同步至雲端。' : '目前只儲存在此瀏覽器的訪客資料。'}` : activeUser ? '新增後會自動同步至你的帳號，只有你能使用。' : '目前是訪客模式，單字儲存在此瀏覽器；登入後可選擇合併至帳號。';
   if (selectedLibrary) $('#add-word-storage').textContent = `儲存至「${selectedLibrary.name}」。${selectedLibrary.visibility === 'public' ? '內容會同步更新給所有閱讀這份單字庫的人。' : '這份單字庫僅自己可見。'}學習進度與收藏仍各自保存。`;
+  else if(libraryPicker.personalSharing()?.visibility==='public') $('#add-word-storage').textContent='這份口袋已公開分享。新增或修改的單字、例句與筆記同步後也會更新公開內容；你的學習進度與收藏仍維持私人。';
+  else if(activeUser && !selectedLibrary) $('#add-word-storage').textContent='儲存至你的帳號口袋。分享範圍可在「口袋分享設定」查看或調整；學習進度與收藏維持私人。';
   if (word) for (const key of ['word', 'meaning', 'pos', 'example', 'translation', 'note']) $(`#new-${key}`).value = word[key];
   wordAssistant.refreshFields();
   $('#new-word').focus();
@@ -711,7 +724,8 @@ async function switchLibrary(id) {
   librarySwitchBusy = true;
   closeWordForm(); closeDeleteWord(); clearActiveQuiz(); repaintProgress();
   try {
-    const library = id === PERSONAL_LIBRARY ? null : await libraryRepository.get(id);
+    let library = id === PERSONAL_LIBRARY ? null : await libraryRepository.get(id);
+    if(library?.source_personal && library.owner_id===userId) library=null;
     if (activeUser?.id !== userId || token !== librarySwitchGeneration) return;
     await cloudSync?.sync();
     if (activeUser?.id !== userId || token !== librarySwitchGeneration) return;
