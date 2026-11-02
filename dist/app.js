@@ -335,6 +335,7 @@ $$('[data-filter]').forEach(button => button.addEventListener('click', () => {
 }));
 const speechPlayer = createSpeechPlayer({ onError: message => toast(message) });
 mountSpeechSettings(speechPlayer, { voice: $('#speech-voice'), rate: $('#speech-rate'), status: $('#speech-status'), preview: $('#speech-preview') });
+(globalThis.requestIdleCallback || (callback => setTimeout(callback, 1500)))(() => speechPlayer.preload());
 function speakText(text) { speechPlayer.speak(text); }
 $('#flashcard').addEventListener('click', event => {
   const speech = event.target.closest('[data-say]');
