@@ -66,7 +66,7 @@ test('a failed download marks the engine failed instead of retrying on every cli
   assert.deepEqual(states, ['loading', 'failed']);
 });
 
-function playerSetup({ state = 'ready', samples = Promise.resolve(Float32Array.of(0.1)), voiceURI = '', audioState = 'running', resumeFails = false } = {}) {
+function playerSetup({ state = 'ready', samples = Promise.resolve(Float32Array.of(0.1)), voiceURI = '', audioState = 'running', resumeFails = false, navigator } = {}) {
   const spoken = [], played = [], errors = [], synthesized = [];
   let unlocks = 0, resumes = 0;
   let engineState = state, loads = 0;
@@ -83,7 +83,7 @@ function playerSetup({ state = 'ready', samples = Promise.resolve(Float32Array.o
     createBufferSource() { return { connect() {}, start() { if (this.buffer.data) played.push(this.buffer.data); else unlocks++; }, stop() {} }; }
   }
   const storage = { getItem: () => JSON.stringify({ voiceURI }), setItem() {} };
-  const player = createSpeechPlayer({ synth, Utterance: class { constructor(text) { this.text = text; } }, AudioContext, storage,
+  const player = createSpeechPlayer({ synth, Utterance: class { constructor(text) { this.text = text; } }, AudioContext, storage, navigator,
     paradee: () => engine, onError: message => errors.push(message) });
   return { player, spoken, played, errors, synthesized, loads: () => loads, unlocks: () => unlocks, resumes: () => resumes };
 }
@@ -106,6 +106,15 @@ test('a mobile audio context is unlocked and resumed during the click', async ()
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(env.played.length, 1);
   assert.deepEqual(env.spoken, []);
+});
+
+test('Paradee selects the iPhone playback audio session before playing', async () => {
+  const audioSession = { type: 'ambient' };
+  const env = playerSetup({ navigator: { audioSession } });
+  env.player.speak('resilient');
+  assert.equal(audioSession.type, 'playback');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(env.played.length, 1);
 });
 
 test('a blocked mobile audio context uses the device voice with a notice', async () => {

@@ -26,6 +26,7 @@ export function createSpeechPlayer(options = {}) {
   const synth = options.synth ?? globalThis.speechSynthesis;
   const Utterance = options.Utterance ?? globalThis.SpeechSynthesisUtterance;
   const AudioContextClass = options.AudioContext ?? globalThis.AudioContext ?? globalThis.webkitAudioContext;
+  const navigator = options.navigator ?? globalThis.navigator;
   const onError = options.onError || (() => {});
   let storage;
   try { storage = options.storage ?? globalThis.localStorage; } catch { storage = null; }
@@ -58,6 +59,8 @@ export function createSpeechPlayer(options = {}) {
   };
   // Start and resume audio while the click still has mobile user activation.
   const audioContext = () => {
+    // On iPhone, Web Audio uses the silent-switch-muted ambient channel by default.
+    try { if (navigator?.audioSession) navigator.audioSession.type = 'playback'; } catch { /* Older browsers lack this API. */ }
     if (!context && AudioContextClass) { try { context = new AudioContextClass(); } catch { context = null; } }
     if (!context) return null;
     if (context.state === 'running') return { audio: context, ready: Promise.resolve(true) };
