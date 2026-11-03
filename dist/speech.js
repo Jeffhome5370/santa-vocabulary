@@ -5,6 +5,14 @@ const RATES = [0.85, 0.95, 1, 1.1];
 // '' picks Paradee when the browser can run it; SYSTEM_AUTO keeps the device's automatic English voice.
 const SYSTEM_AUTO = 'system';
 const PARADEE_PREFIX = 'paradee:';
+const PARADEE_FAILURES = {
+  'audio-start': '音訊啟動失敗 · E1',
+  'generation-timeout': '語音產生逾時 · G2',
+  'generation-error': '語音產生錯誤 · G1',
+  'audio-stopped': '音訊中途停止 · E2',
+  'empty-audio': '語音資料為空 · G3',
+  'audio-output': '音訊輸出失敗 · E3',
+};
 // 16 silent 8-bit PCM samples in a WAV container; an HTML audio channel unmutes Web Audio on iPhone.
 const SILENT_WAV = 'data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAwF0AAMBdAAABAAgAZGF0YRAAAACAgICAgICAgICAgICAgICA';
 const isEnglish = voice => /^en(?:[-_]|$)/i.test(voice.lang || '');
@@ -143,7 +151,7 @@ export function createSpeechPlayer(options = {}) {
       paradeeBlocked = true;
       failureReason = reason;
       notify();
-      if (!warned) { warned = true; onError('Paradee 在此裝置無法播放，已改用裝置語音；若沒聲音，請再點一次。'); }
+      if (!warned) { warned = true; onError(`Paradee 失敗：${PARADEE_FAILURES[reason] || '原因未明'}。已改用裝置語音；請再按一次。`); }
       speakSystem(text);
     };
     waitForAudio(output.ready).then(async ready => {
@@ -244,14 +252,7 @@ export function mountSpeechSettings(player, { voice, rate, status, preview }) {
       : naturalVoice && state === 'generating' ? `Paradee ${naturalVoice.label}正在產生聲音，請稍候。`
       : naturalVoice && state === 'playing' ? `Paradee ${naturalVoice.label}播放中。若仍無聲，請確認手機媒體音量。`
       : naturalVoice && state === 'failed' ? `Paradee 自然語音無法載入，目前使用${device}。`
-      : naturalVoice && state === 'playback-failed' ? `Paradee 在此裝置無法播放（${{
-        'audio-start': '音訊啟動失敗',
-        'generation-timeout': '語音產生逾時',
-        'generation-error': '語音產生錯誤',
-        'audio-stopped': '音訊中途停止',
-        'empty-audio': '語音資料為空',
-        'audio-output': '音訊輸出失敗',
-      }[failureReason] || '原因未明'}），目前使用${device}。若剛才沒有聲音，請再按一次。`
+      : naturalVoice && state === 'playback-failed' ? `Paradee 失敗：${PARADEE_FAILURES[failureReason] || '原因未明'}。目前使用${device}；請再按一次試聽。`
       : naturalVoice ? `已選擇 Paradee ${naturalVoice.label}，第一次朗讀時會下載語音。`
       : selected ? `目前語音：${selected.name}。可換一個聲音試聽；語音選擇會保存在此裝置。`
       : '語音清單尚未提供，會先使用系統預設英文語音。';

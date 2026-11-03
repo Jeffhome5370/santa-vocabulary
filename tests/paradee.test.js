@@ -112,6 +112,7 @@ test('a stalled Paradee generation reports failure and uses the device voice', a
   await new Promise(resolve => setTimeout(resolve, 15));
   assert.equal(env.player.paradeeState(), 'playback-failed');
   assert.equal(env.player.paradeeFailureReason(), 'generation-timeout');
+  assert.match(env.errors[0], /G2/);
   assert.deepEqual(env.spoken, ['resilient']);
 });
 
@@ -144,6 +145,7 @@ test('a blocked mobile audio context uses the device voice with a notice', async
   assert.equal(env.errors.length, 1);
   assert.equal(env.player.paradeeState(), 'playback-failed');
   assert.equal(env.player.paradeeFailureReason(), 'audio-start');
+  assert.match(env.errors[0], /E1/);
   env.player.speak('resilient');
   assert.deepEqual(env.spoken, ['adequate', 'resilient']);
   assert.equal(env.resumes(), 1);
@@ -174,6 +176,7 @@ test('a generation failure falls back to the device voice with one notice', asyn
   assert.deepEqual(env.spoken, ['first', 'second']);
   assert.equal(env.errors.length, 1);
   assert.equal(env.player.paradeeFailureReason(), 'generation-error');
+  assert.match(env.errors[0], /G1/);
 });
 
 test('an empty generated clip identifies the fault before device speech takes over', async () => {
