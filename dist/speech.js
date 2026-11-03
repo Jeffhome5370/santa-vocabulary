@@ -41,7 +41,7 @@ export function createSpeechPlayer(options = {}) {
     if (RATES.includes(saved.rate)) preferences.rate = saved.rate;
   } catch { /* A damaged preference never stops vocabulary loading. */ }
   const listeners = new Set();
-  let active = null, source = null, context = null, unmuteAudio = null, generation = 0, warned = false, paradeeBlocked = false, playback = 'idle';
+  let active = null, source = null, context = null, unmuteAudio = null, generation = 0, warned = false, paradeeBlocked = false, playback = 'idle', failureReason = '';
   const isiPhone = /iPhone|iPad|iPod/i.test(navigator?.userAgent || '')
     || (navigator?.platform === 'MacIntel' && navigator?.maxTouchPoints > 1);
   const notify = () => listeners.forEach(listener => listener());
@@ -129,28 +129,33 @@ export function createSpeechPlayer(options = {}) {
   };
   const waitForClip = clip => {
     let timer;
-    return Promise.race([clip, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Paradee timed out')), clipTimeoutMs); })])
+    return Promise.race([clip, new Promise((_, reject) => { timer = setTimeout(() => reject({ code: 'PARADEE_TIMEOUT' }), clipTimeoutMs); })])
       .finally(() => clearTimeout(timer));
   };
   function speakParadee(text, voice, output) {
     const token = generation;
     playback = 'generating';
+    failureReason = '';
     notify();
-    const fallback = () => {
+    const fallback = reason => {
       if (token !== generation) return;
       playback = 'idle';
       paradeeBlocked = true;
+      failureReason = reason;
       notify();
       if (!warned) { warned = true; onError('Paradee 在此裝置無法播放，已改用裝置語音；若沒聲音，請再點一次。'); }
       speakSystem(text);
     };
-    waitForAudio(output.ready).then(ready => {
+    waitForAudio(output.ready).then(async ready => {
       if (token !== generation) return;
-      if (!ready || output.audio.state !== 'running') { fallback(); return; }
-      return waitForClip(paradee.synthesize(text, voice, preferences.rate)).then(samples => {
-        if (token !== generation) return;
-        if (output.audio.state !== 'running') { fallback(); return; }
-        if (!samples?.length) { fallback(); return; }
+      if (!ready || output.audio.state !== 'running') { fallback('audio-start'); return; }
+      let samples;
+      try { samples = await waitForClip(paradee.synthesize(text, voice, preferences.rate)); }
+      catch (error) { fallback(error?.code === 'PARADEE_TIMEOUT' ? 'generation-timeout' : 'generation-error'); return; }
+      if (token !== generation) return;
+      if (output.audio.state !== 'running') { fallback('audio-stopped'); return; }
+      if (!samples?.length) { fallback('empty-audio'); return; }
+      try {
         const audio = output.audio;
         const buffer = audio.createBuffer(1, samples.length, SAMPLE_RATE);
         buffer.copyToChannel(samples, 0);
@@ -162,21 +167,22 @@ export function createSpeechPlayer(options = {}) {
         clip.start();
         playback = 'playing';
         notify();
-      });
-    }).catch(fallback);
+      } catch { fallback('audio-output'); }
+    }).catch(() => fallback('audio-start'));
     return true;
   }
   return {
     available: available || !!paradee, voices,
     paradeeVoices: () => paradee ? PARADEE_VOICES : [],
     paradeeState: () => paradeeBlocked ? 'playback-failed' : playback !== 'idle' ? playback : paradee?.state() ?? 'unsupported',
+    paradeeFailureReason: () => failureReason,
     preferences: () => ({ ...preferences }),
     selectedVoice: () => chooseEnglishVoice(voices(), preferences.voiceURI),
     paradeeVoice,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     setPreferences(patch) {
       cancel();
-      if (typeof patch.voiceURI === 'string') { preferences.voiceURI = patch.voiceURI; paradeeBlocked = false; warned = false; }
+      if (typeof patch.voiceURI === 'string') { preferences.voiceURI = patch.voiceURI; paradeeBlocked = false; warned = false; failureReason = ''; }
       if (RATES.includes(patch.rate)) preferences.rate = patch.rate;
       try { storage?.setItem(PREFERENCES_KEY, JSON.stringify(preferences)); } catch { /* Continue with session-only preferences. */ }
       preload();
@@ -229,6 +235,7 @@ export function mountSpeechSettings(player, { voice, rate, status, preview }) {
     rate.disabled = preview.disabled = !player.available;
     const naturalVoice = natural.find(item => item.id === player.paradeeVoice());
     const state = player.paradeeState();
+    const failureReason = player.paradeeFailureReason();
     const selected = player.selectedVoice();
     const device = selected ? `裝置語音 ${selected.name}` : '系統預設英文語音';
     status.textContent = !player.available ? '此瀏覽器不支援朗讀。'
@@ -237,7 +244,14 @@ export function mountSpeechSettings(player, { voice, rate, status, preview }) {
       : naturalVoice && state === 'generating' ? `Paradee ${naturalVoice.label}正在產生聲音，請稍候。`
       : naturalVoice && state === 'playing' ? `Paradee ${naturalVoice.label}播放中。若仍無聲，請確認手機媒體音量。`
       : naturalVoice && state === 'failed' ? `Paradee 自然語音無法載入，目前使用${device}。`
-      : naturalVoice && state === 'playback-failed' ? `Paradee 在此裝置無法播放，目前使用${device}。若剛才沒有聲音，請再按一次。`
+      : naturalVoice && state === 'playback-failed' ? `Paradee 在此裝置無法播放（${{
+        'audio-start': '音訊啟動失敗',
+        'generation-timeout': '語音產生逾時',
+        'generation-error': '語音產生錯誤',
+        'audio-stopped': '音訊中途停止',
+        'empty-audio': '語音資料為空',
+        'audio-output': '音訊輸出失敗',
+      }[failureReason] || '原因未明'}），目前使用${device}。若剛才沒有聲音，請再按一次。`
       : naturalVoice ? `已選擇 Paradee ${naturalVoice.label}，第一次朗讀時會下載語音。`
       : selected ? `目前語音：${selected.name}。可換一個聲音試聽；語音選擇會保存在此裝置。`
       : '語音清單尚未提供，會先使用系統預設英文語音。';
