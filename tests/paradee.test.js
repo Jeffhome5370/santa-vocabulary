@@ -66,36 +66,52 @@ test('a failed download marks the engine failed instead of retrying on every cli
   assert.deepEqual(states, ['loading', 'failed']);
 });
 
-function playerSetup({ state = 'ready', samples = Promise.resolve(Float32Array.of(0.1)), voiceURI = '', audioState = 'running', resumeFails = false, navigator } = {}) {
+function playerSetup({ state = 'ready', samples = Promise.resolve(Float32Array.of(0.1)), voiceURI = '', audioState = 'running', resumeFails = false, navigator, onCancel, clipTimeoutMs } = {}) {
   const spoken = [], played = [], errors = [], synthesized = [];
-  let unlocks = 0, resumes = 0;
+  let unlocks = 0, resumes = 0, mediaStarts = 0;
   let engineState = state, loads = 0;
   const engine = {
     state: () => engineState,
     load: () => { loads++; engineState = 'loading'; return new Promise(() => {}); },
     synthesize: (text, voice, speed) => { synthesized.push({ text, voice, speed }); return samples; },
   };
-  const synth = { getVoices: () => [], cancel() {}, speak: utterance => spoken.push(utterance.text), addEventListener() {}, removeEventListener() {} };
+  const synth = { getVoices: () => [], cancel() { onCancel?.(); }, speak: utterance => spoken.push(utterance.text), addEventListener() {}, removeEventListener() {} };
   class AudioContext {
     constructor() { this.state = audioState; this.destination = {}; }
     resume() { resumes++; if (resumeFails) return Promise.reject(new Error('blocked')); this.state = 'running'; return Promise.resolve(); }
     createBuffer() { return { copyToChannel(data) { this.data = data; } }; }
     createBufferSource() { return { connect() {}, start() { if (this.buffer.data) played.push(this.buffer.data); else unlocks++; }, stop() {} }; }
   }
+  class HtmlAudio {
+    constructor(src) { this.src = src; }
+    setAttribute() {}
+    play() { mediaStarts++; return Promise.resolve(); }
+    pause() {}
+  }
   const storage = { getItem: () => JSON.stringify({ voiceURI }), setItem() {} };
-  const player = createSpeechPlayer({ synth, Utterance: class { constructor(text) { this.text = text; } }, AudioContext, storage, navigator,
+  const player = createSpeechPlayer({ synth, Utterance: class { constructor(text) { this.text = text; } }, AudioContext, Audio: HtmlAudio, storage, navigator, clipTimeoutMs,
     paradee: () => engine, onError: message => errors.push(message) });
-  return { player, spoken, played, errors, synthesized, loads: () => loads, unlocks: () => unlocks, resumes: () => resumes };
+  return { player, spoken, played, errors, synthesized, loads: () => loads, unlocks: () => unlocks, resumes: () => resumes, mediaStarts: () => mediaStarts };
 }
 
 test('Paradee is the default voice once loaded and receives the chosen speed', async () => {
   const env = playerSetup();
   env.player.setPreferences({ rate: 0.85 });
   assert.equal(env.player.speak('resilient'), true);
+  assert.equal(env.player.paradeeState(), 'generating');
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(env.synthesized, [{ text: 'resilient', voice: 'af_heart', speed: 0.85 }]);
   assert.equal(env.played.length, 1);
+  assert.equal(env.player.paradeeState(), 'playing');
   assert.deepEqual(env.spoken, []);
+});
+
+test('a stalled Paradee generation reports failure and uses the device voice', async () => {
+  const env = playerSetup({ samples: new Promise(() => {}), clipTimeoutMs: 5 });
+  env.player.speak('resilient');
+  await new Promise(resolve => setTimeout(resolve, 15));
+  assert.equal(env.player.paradeeState(), 'playback-failed');
+  assert.deepEqual(env.spoken, ['resilient']);
 });
 
 test('a mobile audio context is unlocked and resumed during the click', async () => {
@@ -110,9 +126,10 @@ test('a mobile audio context is unlocked and resumed during the click', async ()
 
 test('Paradee selects the iPhone playback audio session before playing', async () => {
   const audioSession = { type: 'ambient' };
-  const env = playerSetup({ navigator: { audioSession } });
+  const env = playerSetup({ navigator: { audioSession, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)' }, onCancel: () => { audioSession.type = 'ambient'; } });
   env.player.speak('resilient');
   assert.equal(audioSession.type, 'playback');
+  assert.equal(env.mediaStarts(), 1);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(env.played.length, 1);
 });
