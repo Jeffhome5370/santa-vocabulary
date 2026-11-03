@@ -66,8 +66,9 @@ test('a failed download marks the engine failed instead of retrying on every cli
   assert.deepEqual(states, ['loading', 'failed']);
 });
 
-function playerSetup({ state = 'ready', samples = Promise.resolve(Float32Array.of(0.1)), voiceURI = '' } = {}) {
+function playerSetup({ state = 'ready', samples = Promise.resolve(Float32Array.of(0.1)), voiceURI = '', audioState = 'running', resumeFails = false } = {}) {
   const spoken = [], played = [], errors = [], synthesized = [];
+  let unlocks = 0, resumes = 0;
   let engineState = state, loads = 0;
   const engine = {
     state: () => engineState,
@@ -76,14 +77,15 @@ function playerSetup({ state = 'ready', samples = Promise.resolve(Float32Array.o
   };
   const synth = { getVoices: () => [], cancel() {}, speak: utterance => spoken.push(utterance.text), addEventListener() {}, removeEventListener() {} };
   class AudioContext {
-    constructor() { this.state = 'running'; this.destination = {}; }
+    constructor() { this.state = audioState; this.destination = {}; }
+    resume() { resumes++; if (resumeFails) return Promise.reject(new Error('blocked')); this.state = 'running'; return Promise.resolve(); }
     createBuffer() { return { copyToChannel(data) { this.data = data; } }; }
-    createBufferSource() { return { connect() {}, start() { played.push(this.buffer.data); }, stop() {} }; }
+    createBufferSource() { return { connect() {}, start() { if (this.buffer.data) played.push(this.buffer.data); else unlocks++; }, stop() {} }; }
   }
   const storage = { getItem: () => JSON.stringify({ voiceURI }), setItem() {} };
   const player = createSpeechPlayer({ synth, Utterance: class { constructor(text) { this.text = text; } }, AudioContext, storage,
     paradee: () => engine, onError: message => errors.push(message) });
-  return { player, spoken, played, errors, synthesized, loads: () => loads };
+  return { player, spoken, played, errors, synthesized, loads: () => loads, unlocks: () => unlocks, resumes: () => resumes };
 }
 
 test('Paradee is the default voice once loaded and receives the chosen speed', async () => {
@@ -94,6 +96,29 @@ test('Paradee is the default voice once loaded and receives the chosen speed', a
   assert.deepEqual(env.synthesized, [{ text: 'resilient', voice: 'af_heart', speed: 0.85 }]);
   assert.equal(env.played.length, 1);
   assert.deepEqual(env.spoken, []);
+});
+
+test('a mobile audio context is unlocked and resumed during the click', async () => {
+  const env = playerSetup({ audioState: 'interrupted' });
+  env.player.speak('resilient');
+  assert.equal(env.unlocks(), 1);
+  assert.equal(env.resumes(), 1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(env.played.length, 1);
+  assert.deepEqual(env.spoken, []);
+});
+
+test('a blocked mobile audio context uses the device voice with a notice', async () => {
+  const env = playerSetup({ audioState: 'suspended', resumeFails: true });
+  env.player.speak('adequate');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(env.spoken, ['adequate']);
+  assert.deepEqual(env.synthesized, []);
+  assert.equal(env.errors.length, 1);
+  assert.equal(env.player.paradeeState(), 'playback-failed');
+  env.player.speak('resilient');
+  assert.deepEqual(env.spoken, ['adequate', 'resilient']);
+  assert.equal(env.resumes(), 1);
 });
 
 test('while the model downloads the device voice speaks instead of staying silent', () => {
